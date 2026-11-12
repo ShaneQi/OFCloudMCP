@@ -1,5 +1,6 @@
 // Cloudflare Worker entry point: checks the connector token, then serves MCP at /mcp.
 import { handleMcp } from "./mcp.js";
+import { backgroundSync } from "./store.js";
 
 function tokenMatches(request, env) {
   const expected = `Bearer ${env.ACCESS_TOKEN}`;
@@ -25,5 +26,13 @@ export default {
       return new Response("Method not allowed\n", { status: 405, headers: { Allow: "POST" } });
     }
     return handleMcp(request, env, ctx);
+  },
+
+  async scheduled(event, env, ctx) {
+    try {
+      console.log("background sync:", await backgroundSync(env, ctx));
+    } catch (e) {
+      console.error("background sync failed:", e?.message ?? e);
+    }
   },
 };

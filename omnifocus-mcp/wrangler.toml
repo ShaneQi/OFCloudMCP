@@ -8,12 +8,19 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Time zone used to display dates and to read "floating" OmniFocus dates.
 TIMEZONE = "America/Chicago"
-# Most transaction files downloaded in one request. Raise it on a paid plan.
-MAX_FETCH = "45"
+# Most transaction files downloaded per request. The free plan allows 50
+# outgoing requests per invocation, and listing the folder (redirect + Digest
+# login) plus the key file use up to ~6. A large database is read over several
+# requests; the cron below keeps it moving. Raise it on a paid plan.
+MAX_FETCH = "40"
+# The cron re-checks WebDAV when the cache is older than this.
+REFRESH_MINUTES = "15"
 
-# Optional, recommended: keep the parsed database between requests.
-#   1. npx wrangler kv namespace create OF_CACHE
-#   2. Uncomment the three lines below and paste the id it prints.
-# [[kv_namespaces]]
-# binding = "OF_CACHE"
-# id = "paste-id-here"
+# Cache for the parsed database (and the unlocked file keys of an encrypted
+# database). With no id, wrangler creates the namespace on the first deploy.
+[[kv_namespaces]]
+binding = "OF_CACHE"
+
+# Background loading and refresh, every minute.
+[triggers]
+crons = ["* * * * *"]

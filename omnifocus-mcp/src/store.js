@@ -120,7 +120,34 @@ async function documentKey(cfg, env, listedUrl) {
 
 const isPrefix = (a, b) => a.length <= b.length && a.every((n, i) => b[i] === n);
 
-export async function loadModel(env, ctx) {
+const STATUS_KEY = "status-v1";
+const MINUTE = 60_000;
+
+async function readCache(env) {
+  if (memo) return { base: memo, source: "memory cache" };
+  if (env.OF_CACHE) {
+    const base = await env.OF_CACHE.get(CACHE_KEY, "json");
+    if (base) return { base, source: "KV cache" };
+  }
+  return { base: null, source: null };
+}
+
+async function writeCache(env, ctx, wait) {
+  if (!env.OF_CACHE) return;
+  const status = { files: memo.files.length, complete: memo.complete, checkedAt: memo.checkedAt };
+  const writes = Promise.all([
+    env.OF_CACHE.put(CACHE_KEY, JSON.stringify(memo)),
+    env.OF_CACHE.put(STATUS_KEY, JSON.stringify(status)),
+  ]);
+  if (wait || !ctx?.waitUntil) await writes;
+  else ctx.waitUntil(writes);
+}
+
+// Loads the model, downloading at most MAX_FETCH new transaction files per
+// call. A large database is therefore read over several calls; progress is
+// kept in memory and KV, and the scheduled handler keeps it moving.
+// With background=true (cron), it never throws for an unfinished load.
+export async function loadModel(env, ctx, { background = false } = {}) {
   const cfg = config(env);
   const files = await listTransactions(cfg);
   if (!files.length) {
@@ -132,47 +159,68 @@ export async function loadModel(env, ctx) {
     throw new UserError(`No transaction files (like 20261101000000=abc+def.zip) were found at ${files.listedUrl}.${hint}`);
   }
   const names = files.map((f) => f.name);
+  const encrypted = files.others.includes("encrypted");
 
-  let base = memo;
-  let source = "memory cache";
-  if (!base && env.OF_CACHE) {
-    base = await env.OF_CACHE.get(CACHE_KEY, "json");
-    source = "KV cache";
-  }
-
-  let pending = files;
+  let { base, source } = await readCache(env);
   let model = newModel();
+  let done = 0;
   if (base && isPrefix(base.files, names)) {
-    pending = files.slice(base.files.length);
     model = base.model;
+    done = base.files.length;
   } else {
     base = null;
   }
 
-  const max = Number(env.MAX_FETCH ?? 45);
-  if (pending.length > max) {
-    throw new UserError(
-      `${pending.length} transaction files need downloading, more than MAX_FETCH (${max}). ` +
-        "Raise MAX_FETCH (a paid Workers plan allows more outgoing requests), " +
-        "or let OmniFocus compact its database and try again."
-    );
-  }
-
-  if (pending.length) {
-    const docKey = files.others.includes("encrypted") ? await documentKey(cfg, env, files.listedUrl) : null;
-    const xmls = await Promise.all(pending.map((f) => download(cfg, f, docKey)));
-    for (const xml of xmls) applyTransaction(model, xml);
-    source = base ? `${source} + ${pending.length} new file(s)` : `full rebuild from ${pending.length} file(s)`;
-    memo = { files: names, model, builtAt: new Date().toISOString() };
-    if (env.OF_CACHE) {
-      const write = env.OF_CACHE.put(CACHE_KEY, JSON.stringify(memo));
-      if (ctx?.waitUntil) ctx.waitUntil(write);
-      else await write;
+  const max = Number(env.MAX_FETCH ?? 40);
+  const batch = files.slice(done, done + max);
+  const now = new Date().toISOString();
+  if (batch.length) {
+    const docKey = encrypted ? await documentKey(cfg, env, files.listedUrl) : null;
+    const xmls = await Promise.all(batch.map((f) => download(cfg, f, docKey)));
+    try {
+      for (const xml of xmls) applyTransaction(model, xml);
+    } catch (e) {
+      memo = null; // the model may be half-updated; start over next time
+      throw e;
     }
+    done += batch.length;
+    source = base ? `${source} + ${batch.length} new file(s)` : `fresh load of ${batch.length} file(s)`;
+    memo = {
+      files: names.slice(0, done), model, complete: done === names.length,
+      builtAt: done === names.length ? now : base?.builtAt ?? now, checkedAt: now,
+    };
+    await writeCache(env, ctx, background || !memo.complete);
   } else {
-    memo = base;
+    memo = { ...base, complete: true, checkedAt: now };
+    if (background && env.OF_CACHE) {
+      await env.OF_CACHE.put(STATUS_KEY, JSON.stringify({ files: done, complete: true, checkedAt: now }));
+    }
   }
 
-  const encrypted = files.others.includes("encrypted");
+  if (!memo.complete) {
+    const left = names.length - done;
+    const msg =
+      `Still loading your OmniFocus database: ${done} of ${names.length} transaction files read ` +
+      `(${max} per request). ` +
+      (env.OF_CACHE
+        ? `It keeps loading in the background every minute; it should be ready in about ${Math.ceil(left / max)} minute(s).`
+        : "Bind the OF_CACHE KV namespace so progress is kept between requests.");
+    if (background) return { partial: true, message: msg };
+    throw new UserError(msg);
+  }
   return { model: memo.model, files: names, source, builtAt: memo.builtAt, encrypted };
+}
+
+// Cron: finish a large first load, then keep the cache fresh so tool calls
+// rarely have to download anything. Skips WebDAV while the cache is complete
+// and was checked recently.
+export async function backgroundSync(env, ctx) {
+  if (!env.OF_CACHE) return "no KV namespace bound; nothing to do";
+  const status = memo
+    ? { complete: memo.complete, checkedAt: memo.checkedAt }
+    : await env.OF_CACHE.get(STATUS_KEY, "json");
+  const freshFor = Number(env.REFRESH_MINUTES ?? 15) * MINUTE;
+  if (status?.complete && Date.now() - Date.parse(status.checkedAt) < freshFor) return "cache is fresh";
+  const r = await loadModel(env, ctx, { background: true });
+  return r.partial ? r.message : `up to date (${r.files.length} files)`;
 }
