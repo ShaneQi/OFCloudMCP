@@ -62,6 +62,14 @@ function applyOp(map, el, norm) {
     delete map[id];
     return;
   }
+  if (op === "reference") {
+    // A reference names an existing object (OmniFocus includes these next to
+    // related changes). Only if we don't have it, take its snapshot.
+    if (!map[id] && el["reference-snapshot"] && typeof el["reference-snapshot"] === "object") {
+      map[id] = { ...norm(el["reference-snapshot"]), id };
+    }
+    return;
+  }
   const fields = norm(el);
   if (op) map[id] = { ...(map[id] ?? {}), ...fields, id }; // update: merge
   else map[id] = { ...fields, id }; // insert

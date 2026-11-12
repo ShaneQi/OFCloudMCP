@@ -227,3 +227,14 @@ test("inspect_sync find returns matching raw elements", async () => {
   assert.match(text, /<task id="big1499">/);
   assert.doesNotMatch(text, /big1498/);
 });
+
+test('op="reference" keeps an existing record and fills in a missing one from its snapshot', async () => {
+  const { newModel, applyTransaction } = await import("../src/ofocus.js");
+  const m = newModel();
+  applyTransaction(m, doc(`<task id="t"><task/><project/><name>T</name></task><context id="c"><context/><name>C</name></context>
+    <task-to-tag id="t.c"><task idref="t"/><context idref="c"/><rank-in-task>0001</rank-in-task></task-to-tag>`));
+  applyTransaction(m, doc(`<task-to-tag id="t.c" op="reference"><reference-snapshot><task idref="t"/><context idref="c"/><rank-in-task>9999</rank-in-task></reference-snapshot></task-to-tag>
+    <task-to-tag id="t.d" op="reference"><reference-snapshot><task idref="t"/><context idref="d"/><rank-in-task>0002</rank-in-task></reference-snapshot></task-to-tag>`));
+  assert.equal(m.taskToTag["t.c"].rankInTask, "0001");
+  assert.deepEqual(m.taskToTag["t.d"], { task: "t", context: "d", rankInTask: "0002", id: "t.d" });
+});
