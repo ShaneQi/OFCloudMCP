@@ -57,6 +57,7 @@ export async function listTransactions(cfg) {
 
   const doc = davParser.parse(await res.text());
   const files = [];
+  const others = [];
   for (const r of doc?.multistatus?.response ?? []) {
     const href = typeof r.href === "string" ? r.href : r.href?.["#text"];
     if (!href) continue;
@@ -69,7 +70,10 @@ export async function listTransactions(cfg) {
       name = last;
     }
     if (TRANSACTION.test(name)) files.push({ name, url: url.toString() });
+    else if (url.toString() !== (res.davUrl ?? cfg.base)) others.push(name + (url.pathname.endsWith("/") ? "/" : ""));
   }
+  files.others = others;
+  files.listedUrl = res.davUrl ?? cfg.base;
   files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return files;
 }
@@ -85,7 +89,14 @@ const isPrefix = (a, b) => a.length <= b.length && a.every((n, i) => b[i] === n)
 export async function loadModel(env, ctx) {
   const cfg = config(env);
   const files = await listTransactions(cfg);
-  if (!files.length) throw new UserError("The OmniFocus.ofocus folder has no transaction files.");
+  if (!files.length) {
+    const seen = files.others;
+    let hint = seen.length
+      ? ` It contains ${seen.length} other entr${seen.length === 1 ? "y" : "ies"}: ${seen.slice(0, 15).join(", ")}${seen.length > 15 ? ", …" : ""}.`
+      : " It is empty.";
+    if (seen.some((n) => /\.ofocus\/?$/i.test(n))) hint += " OFOCUS_URL should end with that .ofocus folder.";
+    throw new UserError(`No transaction files (like 20261101000000=abc+def.zip) were found at ${files.listedUrl}.${hint}`);
+  }
   const names = files.map((f) => f.name);
 
   let base = memo;
