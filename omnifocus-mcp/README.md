@@ -28,8 +28,8 @@ touches `omnifocus-mcp/`, or when run by hand from the Actions tab.
    `ACCESS_TOKEN` (see step 4 of the terminal setup for what each is). They
    survive later deploys, and the WebDAV password never passes through GitHub.
    Until `ACCESS_TOKEN` is set, the Worker refuses every request.
-5. The KV cache (`OF_CACHE`) and the every-minute cron are in `wrangler.toml`;
-   the first deploy creates the KV namespace automatically.
+5. The KV cache (`OF_CACHE`) is declared in `wrangler.toml`; the first deploy
+   creates the namespace automatically.
 6. Continue at step 6 of the terminal setup (test, then add the connector in Claude).
 
 ## Setup in the browser with Workers Builds (alternative)
@@ -108,17 +108,10 @@ It then works in claude.ai (web, desktop, mobile), Cowork, and Claude Code.
 
 ## Limits and troubleshooting
 
-- **CPU time:** the free Workers plan allows 10 ms of CPU per request.
-  Parsing a large database may exceed it ("exceeded CPU" / error 1102), and
-  even reading a large cached model from KV costs CPU. `npm run dump` prints
-  the parse and JSON timings for your database, which tell you whether the
-  free plan can work. The Workers Paid plan (30 s CPU) removes the problem.
-- **Outgoing requests / large databases:** each request downloads at most
-  `MAX_FETCH` (default 40) transaction files, to stay under the free plan's 50
-  outgoing requests. A larger first load is read in batches: progress is
-  saved in KV and a cron runs every minute to continue it, so a database with
-  1,500 files is ready in about 40 minutes. Until then tools answer "Still
-  loading…". Afterwards the cron re-checks every `REFRESH_MINUTES` (15).
+- **Plan limits:** a first load downloads every transaction file and, for an
+  encrypted database, runs over a million PBKDF2 rounds (about 1.5 s of CPU).
+  That needs the Workers Paid plan's limits; the free plan (10 ms CPU, 50
+  outgoing requests per request) is not supported.
 - **Wrong password / folder:** `sync_status` reports the WebDAV error.
 - **Encrypted databases** (an `encrypted` file in `OmniFocus.ofocus`, the
   default on Omni Sync Server) are decrypted using Omni's published format.

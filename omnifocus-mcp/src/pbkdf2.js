@@ -1,7 +1,6 @@
-// Resumable PBKDF2 for one output block (key length ≤ hash length), used
-// because Workers' WebCrypto and node:crypto refuse more than 100,000 rounds
-// and OmniFocus uses over a million. The work can be split across calls:
-// the state { done, u, t } is small and can be saved between them.
+// PBKDF2 for one output block (key length ≤ hash length), used because
+// Workers' WebCrypto and node:crypto refuse more than 100,000 rounds and
+// OmniFocus uses over a million.
 //
 // SHA-1 and SHA-256 use a pure-JS HMAC with precomputed pad states (two
 // compressions per round). SHA-512 falls back to WebCrypto HMAC per round.
@@ -146,9 +145,12 @@ function hmacJs(H, key) {
   };
 }
 
-// Runs up to `budget` more rounds. state: null to start, or a previous result.
-// Returns { done, rounds, u, t } with u/t as plain arrays (JSON-safe), and
-// key (Uint8Array of keyLen bytes) once done === rounds.
+export async function pbkdf2(opts) {
+  return (await pbkdf2Step(opts, null, Infinity)).key;
+}
+
+// Runs up to `budget` more rounds (internal; also used by tests to check
+// the round loop in pieces). state: null to start, or a previous result.
 export async function pbkdf2Step({ password, salt, rounds, prf, keyLen = 16 }, state, budget) {
   const pw = new TextEncoder().encode(password);
   const H = HASHES[prf];

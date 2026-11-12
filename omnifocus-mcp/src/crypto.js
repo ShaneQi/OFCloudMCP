@@ -11,7 +11,7 @@
 //   zero padding to 16, segments [IV 12][MAC 20][≤64 KiB AES-128-CTR data],
 //   then a 32-byte HMAC-SHA256 over 0x01 || segment MACs.
 import { UserError } from "./errors.js";
-import { pbkdf2Step } from "./pbkdf2.js";
+import { pbkdf2 } from "./pbkdf2.js";
 
 const subtle = globalThis.crypto.subtle;
 const MAGIC = new TextEncoder().encode("OmniFileEncryption\0\0");
@@ -141,23 +141,18 @@ function parseSlots(bytes) {
   return slots;
 }
 
-// Unlocks the key slots, doing at most `budget` PBKDF2 rounds now.
-// Returns { slots } when done, or { state, done, rounds } to resume later
-// (pass the state back in). PBKDF2 for OmniFocus runs over a million rounds,
-// more than Workers' built-in PBKDF2 allows and more CPU than one free-plan
-// request has, hence the resumable form.
-export async function unlockStep(metaBytes, passphrase, state, budget) {
+// Returns the unwrapped key-slot bytes (cacheable), given the "encrypted" file.
+export async function unlockDocumentKey(metaBytes, passphrase) {
   const meta = parseMetadata(metaBytes);
-  if (meta.method === "static") return { slots: meta.key };
+  if (meta.method === "static") return meta.key;
   if (meta.method !== "password" || meta.algorithm !== "PBKDF2; aes128-wrap") {
     throw new UserError(`The OmniFocus database uses an unsupported encryption method (${meta.method}; ${meta.algorithm}).`);
   }
   const prf = meta.prf ?? "sha1";
   if (!PRF[prf]) throw new UserError(`The OmniFocus database uses an unsupported key derivation (prf ${prf}).`);
-  const r = await pbkdf2Step({ password: passphrase, salt: meta.salt, rounds: meta.rounds, prf }, state, budget);
-  if (!r.key) return { state: r, done: r.done, rounds: r.rounds };
+  const kek = await deriveKey(passphrase, meta.salt, meta.rounds, prf);
   try {
-    return { slots: await aesUnwrap(r.key, meta.key) };
+    return await aesUnwrap(kek, meta.key);
   } catch {
     throw new UserError(
       "Could not unlock the encrypted OmniFocus database: the passphrase is wrong. " +
@@ -166,9 +161,15 @@ export async function unlockStep(metaBytes, passphrase, state, budget) {
   }
 }
 
-// One-shot unlock (tests and the dump script).
-export async function unlockDocumentKey(metaBytes, passphrase) {
-  return (await unlockStep(metaBytes, passphrase, null, Infinity)).slots;
+// WebCrypto PBKDF2 where allowed; Workers refuses more than 100,000 rounds
+// (OmniFocus uses over a million), so fall back to the pure-JS version.
+async function deriveKey(passphrase, salt, rounds, prf) {
+  try {
+    const base = await subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
+    return new Uint8Array(await subtle.deriveBits({ name: "PBKDF2", hash: PRF[prf], salt, iterations: rounds }, base, 128));
+  } catch {
+    return pbkdf2({ password: passphrase, salt, rounds, prf, keyLen: 16 });
+  }
 }
 
 export function keyInfo(slotBytes) {

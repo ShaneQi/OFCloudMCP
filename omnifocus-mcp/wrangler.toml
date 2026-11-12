@@ -8,24 +8,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Time zone used to display dates and to read "floating" OmniFocus dates.
 TIMEZONE = "America/Chicago"
-# Most transaction files downloaded per request. The free plan allows 50
-# outgoing requests per invocation, and listing the folder (redirect + Digest
-# login) plus the key file use up to ~6. A large database is read over several
-# requests; the cron below keeps it moving. Raise it on a paid plan.
-MAX_FETCH = "40"
-# PBKDF2 rounds per run when unlocking an encrypted database. OmniFocus uses
-# over a million; ~10,000 fits the free plan's 10 ms CPU, so unlocking is
-# spread over many cron runs. On Workers Paid, set 2000000 (one request).
-PBKDF2_ROUNDS_PER_RUN = "10000"
-# The cron re-checks WebDAV when the cache is older than this.
-REFRESH_MINUTES = "15"
 
 # Cache for the parsed database (and the unlocked file keys of an encrypted
 # database). With no id, wrangler creates the namespace on the first deploy.
 [[kv_namespaces]]
 binding = "OF_CACHE"
-
-# Background loading and refresh. Disabled: an empty list removes the cron
-# from Cloudflare. To turn it back on: crons = ["* * * * *"]
-[triggers]
-crons = []

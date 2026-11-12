@@ -58,7 +58,6 @@ const ENV = {
   WEBDAV_PASS: "pw",
   ACCESS_TOKEN: "secret-token",
   TIMEZONE: "America/Chicago",
-  MAX_FETCH: "45",
 };
 const ctx = { waitUntil() {} };
 
@@ -187,69 +186,22 @@ async function callWith(env, name, args = {}) {
   return (await res.json()).result;
 }
 
-test("reads an encrypted database, unlocking the key over several runs", async () => {
+test("reads an encrypted database", async () => {
   const { readdirSync, readFileSync } = await import("node:fs");
   const dir = new URL("./fixtures/encrypted.ofocus/", import.meta.url); // 200,000 PBKDF2-SHA256 rounds
   resetCache();
   files = {};
   for (const n of readdirSync(dir)) files[n] = readFileSync(new URL(n, dir));
   installFakeDav();
-  const env = { ...ENV, PBKDF2_ROUNDS_PER_RUN: "150000" };
-  const first = await callWith(env, "sync_status");
-  assert.equal(first.isError, true);
-  assert.match(first.content[0].text, /Unlocking your encrypted OmniFocus database: 75% \(150,000 of 200,000/);
-
-  const status = (await callWith(env, "sync_status")).content[0].text;
+  const status = (await callWith(ENV, "sync_status")).content[0].text;
   assert.match(status, /Encrypted: yes/);
   assert.match(status, /Transaction files: 3/);
-  const inbox = (await callWith(env, "list_inbox")).content[0].text;
+  const inbox = (await callWith(ENV, "list_inbox")).content[0].text;
   assert.match(inbox, /Inbox \(1500\)/);
   assert.match(inbox, /Bulk item 1499/);
 
   resetCache();
-  const bad = await callWith({ ...ENV, PBKDF2_ROUNDS_PER_RUN: "1000000", OF_PASSPHRASE: "wrong" }, "list_inbox");
+  const bad = await callWith({ ...ENV, OF_PASSPHRASE: "wrong" }, "list_inbox");
   assert.equal(bad.isError, true);
   assert.match(bad.content[0].text, /passphrase is wrong/);
-});
-
-test("loads a large database over several requests, with progress in KV", async () => {
-  const kv = new Map();
-  const KV = {
-    get: async (k, type) => (kv.has(k) ? (type === "json" ? JSON.parse(kv.get(k)) : kv.get(k)) : null),
-    put: async (k, v) => void kv.set(k, v),
-  };
-  const env = { ...ENV, MAX_FETCH: "2", OF_CACHE: KV };
-  const callEnv = async (name) => {
-    const res = await worker.fetch(new Request("https://w.example/mcp", {
-      method: "POST",
-      headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
-    }), env, ctx);
-    return (await res.json()).result;
-  };
-  resetCache();
-  files = { "20261101000000=aaa.zip": zip(BASE), "20261102000000=bbb+aaa.zip": zip(UPDATE), "20261103000000=ccc+bbb.zip": zip(LATER) };
-  installFakeDav();
-  const first = await callEnv("list_inbox");
-  assert.equal(first.isError, true);
-  assert.match(first.content[0].text, /Still loading .* 2 of 3 transaction files/);
-
-  // The cron picks up where it left off, from KV, in a fresh instance.
-  resetCache();
-  gets = [];
-  await worker.scheduled({}, env, ctx);
-  assert.deepEqual(gets, ["20261103000000=ccc+bbb.zip"]);
-  assert.equal(JSON.parse(kv.get("status-v1")).complete, true);
-
-  // Fresh cache: the next cron run skips WebDAV entirely.
-  resetCache();
-  let calls = 0;
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (...a) => (calls++, realFetch(...a));
-  await worker.scheduled({}, env, ctx);
-  assert.equal(calls, 0);
-  globalThis.fetch = realFetch;
-
-  const inbox = await callEnv("list_inbox");
-  assert.match(inbox.content[0].text, /Renew passport/);
 });
