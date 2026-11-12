@@ -97,6 +97,12 @@ export async function loadModel(env, ctx) {
     if (seen.some((n) => /\.ofocus\/?$/i.test(n))) hint += " OFOCUS_URL should end with that .ofocus folder.";
     throw new UserError(`No transaction files (like 20261101000000=abc+def.zip) were found at ${files.listedUrl}.${hint}`);
   }
+  if (files.others.includes("encrypted")) {
+    throw new UserError(
+      `The OmniFocus database at ${files.listedUrl} is encrypted (it has an "encrypted" file), ` +
+        "and this connector cannot decrypt it yet."
+    );
+  }
   const names = files.map((f) => f.name);
 
   let base = memo;
