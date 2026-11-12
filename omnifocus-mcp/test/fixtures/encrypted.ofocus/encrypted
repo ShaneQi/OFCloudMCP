@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>algorithm</key>
+		<string>PBKDF2; aes128-wrap</string>
+		<key>key</key>
+		<data>
+		hV5m0FdOOaV+8zIPBoTogmWBPnPHGfE928Ptz+z+6hFpsLS+CMdfBPPnfQy4
+		3xzn
+		</data>
+		<key>method</key>
+		<string>password</string>
+		<key>prf</key>
+		<string>sha256</string>
+		<key>rounds</key>
+		<integer>200000</integer>
+		<key>salt</key>
+		<data>
+		h1K/e5VwdryQJJcEYbC1XAnCqxI=
+		</data>
+	</dict>
+</array>
+</plist>

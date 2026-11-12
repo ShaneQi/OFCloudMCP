@@ -177,3 +177,28 @@ test('"false" in <hidden> or <completed> does not mark items dropped or done', a
   assert.match(tags, /Office · 1 remaining/);
   assert.doesNotMatch(tags, /dropped/);
 });
+
+test("reads an encrypted database (fixture made by an independent Python encryptor)", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = new URL("./fixtures/encrypted.ofocus/", import.meta.url);
+  resetCache();
+  files = {};
+  for (const n of readdirSync(dir)) files[n] = readFileSync(new URL(n, dir));
+  installFakeDav();
+  const status = (await call("sync_status")).content[0].text;
+  assert.match(status, /Encrypted: yes/);
+  assert.match(status, /Transaction files: 3/);
+  const inbox = (await call("list_inbox")).content[0].text;
+  assert.match(inbox, /Inbox \(1500\)/);
+  assert.match(inbox, /Bulk item 1499/);
+
+  resetCache();
+  const bad = await worker.fetch(new Request("https://w.example/mcp", {
+    method: "POST",
+    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_inbox", arguments: {} } }),
+  }), { ...ENV, OF_PASSPHRASE: "wrong" }, ctx);
+  const r = (await bad.json()).result;
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /passphrase is wrong/);
+});

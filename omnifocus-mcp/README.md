@@ -119,8 +119,17 @@ It then works in claude.ai (web, desktop, mobile), Cowork, and Claude Code.
   stops before the free plan's request cap. If you hit it, raise `MAX_FETCH`
   on a paid plan, or let OmniFocus compact its database.
 - **Wrong password / folder:** `sync_status` reports the WebDAV error.
-- **Encrypted sync** is not supported. An `encrypted` file at the top of the
-  `OmniFocus.ofocus` folder means the database is encrypted.
+- **Encrypted databases** (an `encrypted` file in `OmniFocus.ofocus`, the
+  default on Omni Sync Server) are decrypted using Omni's published format.
+  The passphrase is `WEBDAV_PASS` unless you set a separate `OF_PASSPHRASE`
+  secret. Unlocking the key is deliberately slow (PBKDF2), so the unlocked
+  file keys are kept in memory and, if bound, in the `OF_CACHE` KV namespace
+  (which already holds the decrypted task data). Changing your password
+  rewrites the `encrypted` file and forces a fresh unlock.
+- **Omni Sync Server** works: use
+  `https://sync.omnigroup.com/<account>/OmniFocus.ofocus/` as `OFOCUS_URL`
+  and your Omni account name and password. Digest login and the redirect to
+  a `syncN` host are handled.
 - **Rotating the token:** run `npx wrangler secret put ACCESS_TOKEN` again
   and update the header in Claude's connector settings.
 

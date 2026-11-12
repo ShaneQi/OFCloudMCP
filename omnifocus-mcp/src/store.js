@@ -4,6 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { UserError } from "./errors.js";
 import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
 import { davFetch, resetDigest } from "./dav.js";
+import { isEncryptedFile, unlockDocumentKey, decryptFile } from "./crypto.js";
 
 const CACHE_KEY = "model-v1";
 const TRANSACTION = /^\d{14}=.+\.zip$/;
@@ -20,9 +21,11 @@ const davParser = new XMLParser({
 });
 
 let memo = null; // { files: string[], model, builtAt }
+let docKeyMemo = null; // { id, slots }
 
 export function resetCache() {
   memo = null;
+  docKeyMemo = null;
   resetDigest();
 }
 
@@ -78,10 +81,41 @@ export async function listTransactions(cfg) {
   return files;
 }
 
-async function download(cfg, file) {
+async function download(cfg, file, docKey) {
   const res = await davFetch(cfg, file.url);
   if (!res.ok) throw new UserError(`Downloading ${file.name} failed (HTTP ${res.status}).`);
-  return readContentsXml(new Uint8Array(await res.arrayBuffer()));
+  let bytes = new Uint8Array(await res.arrayBuffer());
+  if (docKey) bytes = await decryptFile(file.name, bytes, docKey);
+  else if (isEncryptedFile(bytes)) throw new UserError(`${file.name} is encrypted, but the folder has no "encrypted" key file.`);
+  return readContentsXml(bytes);
+}
+
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const b64 = (u8) => btoa(String.fromCharCode(...u8));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+// Unlocks the database's file keys. PBKDF2 is slow on purpose, so the result
+// is kept in memory and (if bound) in KV, keyed by a hash of the "encrypted"
+// file; a password change rewrites that file and so forces a fresh unlock.
+async function documentKey(cfg, env, listedUrl) {
+  const dir = listedUrl.endsWith("/") ? listedUrl : listedUrl + "/";
+  const res = await davFetch(cfg, new URL("encrypted", dir).toString());
+  if (!res.ok) throw new UserError(`Downloading the "encrypted" key file failed (HTTP ${res.status}).`);
+  const meta = new Uint8Array(await res.arrayBuffer());
+  const id = hex(await crypto.subtle.digest("SHA-256", meta));
+  if (docKeyMemo?.id === id) return docKeyMemo.slots;
+  const kvKey = `dockey-v1:${id}`;
+  let slots = null;
+  if (env.OF_CACHE) {
+    const saved = await env.OF_CACHE.get(kvKey);
+    if (saved) slots = unb64(saved);
+  }
+  if (!slots) {
+    slots = await unlockDocumentKey(meta, env.OF_PASSPHRASE || env.WEBDAV_PASS);
+    if (env.OF_CACHE) await env.OF_CACHE.put(kvKey, b64(slots));
+  }
+  docKeyMemo = { id, slots };
+  return slots;
 }
 
 const isPrefix = (a, b) => a.length <= b.length && a.every((n, i) => b[i] === n);
@@ -96,12 +130,6 @@ export async function loadModel(env, ctx) {
       : " It is empty.";
     if (seen.some((n) => /\.ofocus\/?$/i.test(n))) hint += " OFOCUS_URL should end with that .ofocus folder.";
     throw new UserError(`No transaction files (like 20261101000000=abc+def.zip) were found at ${files.listedUrl}.${hint}`);
-  }
-  if (files.others.includes("encrypted")) {
-    throw new UserError(
-      `The OmniFocus database at ${files.listedUrl} is encrypted (it has an "encrypted" file), ` +
-        "and this connector cannot decrypt it yet."
-    );
   }
   const names = files.map((f) => f.name);
 
@@ -131,7 +159,8 @@ export async function loadModel(env, ctx) {
   }
 
   if (pending.length) {
-    const xmls = await Promise.all(pending.map((f) => download(cfg, f)));
+    const docKey = files.others.includes("encrypted") ? await documentKey(cfg, env, files.listedUrl) : null;
+    const xmls = await Promise.all(pending.map((f) => download(cfg, f, docKey)));
     for (const xml of xmls) applyTransaction(model, xml);
     source = base ? `${source} + ${pending.length} new file(s)` : `full rebuild from ${pending.length} file(s)`;
     memo = { files: names, model, builtAt: new Date().toISOString() };
@@ -144,5 +173,6 @@ export async function loadModel(env, ctx) {
     memo = base;
   }
 
-  return { model: memo.model, files: names, source, builtAt: memo.builtAt };
+  const encrypted = files.others.includes("encrypted");
+  return { model: memo.model, files: names, source, builtAt: memo.builtAt, encrypted };
 }

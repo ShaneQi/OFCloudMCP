@@ -493,6 +493,7 @@ export const TOOLS = [
       return [
         `Transaction files: ${meta.files.length} (newest ${meta.files.at(-1)})`,
         `Loaded from: ${meta.source}`,
+        `Encrypted: ${meta.encrypted ? "yes (decrypted by the connector)" : "no"}`,
         `Model built: ${meta.builtAt}`,
         `Actions: ${ix.all.length - projects.length} (${remaining.filter((t) => !t.project).length} remaining)`,
         `Projects: ${projects.length} (${projects.filter((p) => projectStatus(ix, p) === "active").length} active)`,
