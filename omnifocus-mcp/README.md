@@ -7,11 +7,13 @@ WebDAV password stays on that server; Claude only holds a separate access
 token.
 
 Read tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
-`get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`,
-`inspect_sync` (diagnostics).
+`get_project`, `search_tasks`, `list_tags`, `get_task`, `get_attachment`,
+`sync_status`, `inspect_sync` (diagnostics).
 
 Write tools (off unless `ALLOW_WRITES=true`; see "Writing" below):
-`add_task`, `edit_task`, `complete_task`, `drop_task`.
+`add_task`, `edit_task`, `complete_task`, `drop_task`, `add_tag`,
+`add_project`, `set_project_status`, `delete_task`, `add_attachment`,
+`delete_attachment`.
 
 ## Writing
 
@@ -19,12 +21,23 @@ The write tools add one sync transaction per change, in the format OmniFocus
 4.10 writes (checked against a real database with `inspect_sync`):
 
 - `add_task`: a new action in the inbox or an active project, with note,
-  existing tags, defer/due/planned dates, flag and estimate.
-- `edit_task`: change name, note, dates, flag, estimate, tags, or move an
-  action to another project or the inbox. Only the given fields change.
+  tags, defer/due/planned dates, flag, estimate and repeat rule.
+- `edit_task`: change name, note, dates, flag, estimate, tags or repeat rule,
+  or move an action to another project or the inbox. Only given fields change.
 - `complete_task` / `drop_task`: complete or drop an action (`undo: true`
-  reverses). Repeating actions and projects are refused: do those in
-  OmniFocus, which has to schedule the next repeat.
+  reverses). Completing a repeating action works like OmniFocus: the action
+  is completed and its next occurrence (id `<id>.<n>`) is created with dates
+  moved on by the rule (fixed, or counted from completion). Supported rules:
+  FREQ HOURLY/DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL, BYDAY (incl. "2WE",
+  "-1FR"), BYMONTHDAY, BYMONTH, UNTIL; others (e.g. COUNT) are refused.
+- `add_tag`: a new tag, optionally inside another tag.
+- `add_project`: a parallel, sequential or single-action project, optionally
+  in a folder, active or on hold. `set_project_status`: active, on hold,
+  completed or dropped.
+- `delete_task`: permanently delete an action or project with its
+  sub-actions, tag links and attachments (prefer dropping).
+- `add_attachment` / `delete_attachment` / `get_attachment`: attachments are
+  stored like OmniFocus does, as `data/data-<sha256>.zip` (encrypted).
 
 Safety:
 
@@ -38,7 +51,8 @@ Safety:
   or an unexpected chain.
 - Upload goes to a temporary name and is moved into place (WebDAV `MOVE`,
   no overwrite), so devices never see a partial file.
-- Nothing is ever deleted: dropping is OmniFocus' own reversible "dropped".
+- Only `delete_task` and `delete_attachment` remove anything; everything else
+  is reversible (dropping is OmniFocus' own "dropped").
 
 Before turning writes on, back up the database (OmniFocus on the Mac:
 File → Back Up Database), then try one `add_task` and check that it appears

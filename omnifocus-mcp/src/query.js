@@ -479,6 +479,8 @@ export const TOOLS = [
         const open = kids.filter((k) => !ix.info(k).closed).length;
         out.push(`Sub-items: ${open} remaining of ${kids.length}`);
       }
+      const atts = Object.values(ix.model.attachments ?? {}).filter((x) => x.task === t.id);
+      if (atts.length) out.push(`Attachments: ${atts.map((x) => `${x.name} [attachment id:${x.id}]`).join(", ")}`);
       if (t.note) out.push(`Note:\n${t.note}`);
       return out.join("\n");
     },

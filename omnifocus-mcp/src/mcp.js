@@ -2,10 +2,10 @@
 import { UserError } from "./errors.js";
 import { loadModel } from "./store.js";
 import { TOOLS as READ_TOOLS, makeIndex } from "./query.js";
-import { WRITE_TOOLS } from "./writetools.js";
+import { WRITE_TOOLS, ATTACHMENT_READ_TOOL } from "./writetools.js";
 import { writeMode } from "./write.js";
 
-const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS];
+const TOOLS = [...READ_TOOLS, ATTACHMENT_READ_TOOL, ...WRITE_TOOLS];
 
 const SUPPORTED_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -79,8 +79,8 @@ async function callTool(tool, args, env, ctx) {
   try {
     const data = await loadModel(env, ctx);
     const ix = makeIndex(data.model, env.TIMEZONE || "UTC", Date.now());
-    const text = await tool.run(ix, args, data, { env, ctx });
-    return { content: [{ type: "text", text }] };
+    const out = await tool.run(ix, args, data, { env, ctx });
+    return typeof out === "string" ? { content: [{ type: "text", text: out }] } : out;
   } catch (e) {
     const text = e instanceof UserError ? e.message : `Unexpected error: ${e?.message ?? e}`;
     if (!(e instanceof UserError)) console.error(e);

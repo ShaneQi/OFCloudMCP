@@ -52,7 +52,7 @@ function noteXml(note) {
 }
 
 // ---------- dates ----------
-function wallParts(ms, tz) {
+export function wallParts(ms, tz) {
   const f = new Intl.DateTimeFormat("en-US", {
     timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -118,38 +118,73 @@ const TASK_FIELDS = [
 const leaf = (tag, v) => (v == null || v === "" ? `<${tag}/>` : `<${tag}>${esc(v)}</${tag}>`);
 const idref = (tag, id) => (id ? `<${tag} idref="${esc(id)}"/>` : `<${tag}/>`);
 
+// A project's <project> block. p: { folder, singleton, lastReview, nextReview, reviewInterval, status }
+export function projectBlockXml(p) {
+  return (
+    `<project>${idref("folder", p.folder)}${leaf("singleton", p.singleton ? "true" : "false")}` +
+    `${leaf("last-review", p.lastReview)}${leaf("next-review", p.nextReview)}` +
+    `${leaf("review-interval", p.reviewInterval)}${leaf("status", p.status ?? "active")}</project>`
+  );
+}
+
 function fieldXml(tag, v) {
   switch (tag) {
-    case "project": return "<project/>"; // actions only
+    case "project": return v && typeof v === "object" ? projectBlockXml(v) : "<project/>";
     case "task": return idref("task", v);
     case "context": return idref("context", v);
-    case "note": return noteXml(v);
+    case "note":
+      if (v && typeof v === "object" && "raw" in v) return v.raw ? `<note>${v.raw}</note>` : "<note/>";
+      return noteXml(v);
     default: return leaf(tag, v);
   }
 }
 
+// f: id, name, note (text) or noteRaw (inner XML), inbox, parent, added,
+// modified, rank, context, start, planned, due, estimate, flagged, plus
+// optional project (block object), order, and `extra` raw field overrides.
 export function taskInsertXml(f) {
   const vals = {
-    project: null, inbox: f.inbox ? "true" : "false", task: f.parent ?? null, added: f.added,
-    name: f.name, note: f.note ?? null, rank: String(f.rank), hidden: null, context: f.context ?? null,
-    start: f.start ?? null, planned: f.planned ?? null, due: f.due ?? null, completed: null,
-    "estimated-minutes": f.estimate ?? null, order: "parallel", flagged: f.flagged ? "true" : "false",
-    "completed-by-children": "false", "repetition-rule": null, "repetition-method": null,
-    "repetition-schedule-type": null, "repetition-anchor-date": null, "catch-up-automatically": "false",
-    "next-clone-identifier": "0", "due-date-alarm-policy": null, "defer-date-alarm-policy": null,
-    "latest-time-to-start-alarm-policy": null, "planned-date-alarm-policy": null, modified: f.modified,
+    project: f.project ?? null, inbox: f.inbox ? "true" : "false", task: f.parent ?? null, added: f.added,
+    name: f.name, note: f.noteRaw !== undefined ? { raw: f.noteRaw } : f.note ?? null, rank: String(f.rank),
+    hidden: null, context: f.context ?? null, start: f.start ?? null, planned: f.planned ?? null, due: f.due ?? null,
+    completed: null, "estimated-minutes": f.estimate ?? null, order: f.order ?? "parallel",
+    flagged: f.flagged ? "true" : "false", "completed-by-children": "false", "repetition-rule": null,
+    "repetition-method": null, "repetition-schedule-type": null, "repetition-anchor-date": null,
+    "catch-up-automatically": "false", "next-clone-identifier": "0", "due-date-alarm-policy": null,
+    "defer-date-alarm-policy": null, "latest-time-to-start-alarm-policy": null, "planned-date-alarm-policy": null,
+    modified: f.modified, ...(f.extra ?? {}),
   };
   const body = TASK_FIELDS.map((t) => "    " + fieldXml(t, vals[t])).join("\n");
   return `  <task id="${esc(f.id)}">\n${body}\n  </task>`;
 }
 
+export const taskDeleteXml = (id) => `  <task id="${esc(id)}" op="delete"/>`;
+
+// Field order of a tag (context) as OmniFocus 4.10 writes it.
+export function contextInsertXml(c) {
+  return (
+    `  <context id="${esc(c.id)}">\n    ${idref("context", c.parent)}\n    ${leaf("added", c.added)}\n` +
+    `    ${leaf("name", c.name)}\n    <note/>\n    ${leaf("rank", String(c.rank))}\n    <hidden/>\n` +
+    `    ${leaf("prohibits-next-action", c.onHold ? "true" : "false")}\n    <location/>\n` +
+    `    <tasks-user-ordered>false</tasks-user-ordered>\n    ${leaf("modified", c.modified)}\n  </context>`
+  );
+}
+
+export function attachmentInsertXml(a) {
+  return (
+    `  <attachment id="${esc(a.id)}">\n    ${idref("task", a.task)}\n    ${leaf("added", a.added)}\n` +
+    `    ${leaf("name", a.name)}\n    ${leaf("data-identifier", a.dataId)}\n  </attachment>`
+  );
+}
+export const attachmentDeleteXml = (id) => `  <attachment id="${esc(id)}" op="delete"/>`;
+
 // changes: { field: value } using XML field names. OmniFocus writes the
 // structural fields first, then added and modified, then the rest.
-export function taskUpdateXml(id, added, modified, changes, { isProject = false } = {}) {
+export function taskUpdateXml(id, added, modified, changes) {
   const parts = [];
   const order = TASK_FIELDS.filter((t) => t !== "added" && t !== "modified");
   const early = ["project", "inbox", "task"];
-  for (const t of early) if (t in changes && !(t === "project" && isProject)) parts.push(fieldXml(t, changes[t]));
+  for (const t of early) if (t in changes) parts.push(fieldXml(t, changes[t]));
   parts.push(leaf("added", added), leaf("modified", modified));
   for (const t of order) if (!early.includes(t) && t in changes) parts.push(fieldXml(t, changes[t]));
   return `  <task id="${esc(id)}" op="update">${parts.join("")}</task>`;
@@ -228,7 +263,16 @@ export async function commit(env, ctx, build, { dryRun }) {
   const problem = plan.check(copy);
   if (problem) throw new Error(`Verification failed: ${problem}`);
 
+  // Extra files the transaction refers to (attachment data), uploaded first.
+  const uploads = [];
+  for (const u of plan.uploads ?? []) {
+    const enc = docKey ? await encryptFile(u.bytes, docKey) : u.bytes;
+    if (docKey && (await decryptFile(u.path, enc, docKey)).length !== u.bytes.length) throw new Error(`Verification of ${u.path} failed.`);
+    uploads.push({ path: u.path, bytes: enc });
+  }
+
   const report = [plan.summary, `Transaction: ${name}${docKey ? " (encrypted)" : ""}, ${bytes.length} bytes.`];
+  for (const u of uploads) report.push(`File: ${u.path}, ${u.bytes.length} bytes.`);
   if (dryRun || writeMode(env) !== "on") {
     report.unshift(
       dryRun
@@ -241,6 +285,7 @@ export async function commit(env, ctx, build, { dryRun }) {
 
   // Upload under a temporary name, then move into place.
   const dir = files.listedUrl.endsWith("/") ? files.listedUrl : files.listedUrl + "/";
+  for (const u of uploads) await putFile(cfg, dir, u.path, u.bytes, { skipIfExists: true });
   const finalUrl = new URL(encodeURIComponent(name), dir).toString();
   const tmpName = `${name}-write-in-progress-${newId()}`;
   const tmpUrl = new URL(encodeURIComponent(tmpName), dir).toString();
@@ -262,4 +307,28 @@ export async function commit(env, ctx, build, { dryRun }) {
   const problemAfter = plan.check(after.model);
   report.unshift(problemAfter ? `Written, but reading it back shows: ${problemAfter}` : "Done.");
   return report.join("\n");
+}
+
+// Uploads one file (path relative to the .ofocus folder) via a temporary name
+// and MOVE. Content-addressed files that already exist are left alone.
+export async function putFile(cfg, dir, path, bytes, { skipIfExists = false } = {}) {
+  const url = new URL(path.split("/").map(encodeURIComponent).join("/"), dir).toString();
+  if (skipIfExists) {
+    const head = await davFetch(cfg, url, { method: "HEAD" });
+    if (head.ok) return "exists";
+  }
+  const tmpUrl = `${url}-write-in-progress-${newId()}`;
+  let res = await davFetch(cfg, tmpUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream", "If-None-Match": "*" },
+    body: bytes,
+  });
+  if (!res.ok) throw new UserError(`Uploading ${path} failed (HTTP ${res.status}). Nothing was changed.`);
+  res = await davFetch(cfg, tmpUrl, { method: "MOVE", headers: { Destination: url, Overwrite: "F" } });
+  if (!res.ok && !(skipIfExists && res.status === 412)) {
+    await davFetch(cfg, tmpUrl, { method: "DELETE" }).catch(() => {});
+    throw new UserError(`Moving ${path} into place failed (HTTP ${res.status}). Nothing was changed.`);
+  }
+  if (!res.ok) await davFetch(cfg, tmpUrl, { method: "DELETE" }).catch(() => {});
+  return "uploaded";
 }
