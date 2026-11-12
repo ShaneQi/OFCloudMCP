@@ -81,6 +81,24 @@ export async function listTransactions(cfg) {
   return files;
 }
 
+// Downloads one file and returns its bytes, decrypted if the database is.
+export async function fetchFile(cfg, url, name, docKey) {
+  const res = await davFetch(cfg, url);
+  if (!res.ok) throw new UserError(`Downloading ${name} failed (HTTP ${res.status}).`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return docKey && isEncryptedFile(bytes) ? decryptFile(name, bytes, docKey) : bytes;
+}
+
+// Everything needed to read or add raw files: WebDAV config, the current
+// transaction listing, and the unlocked key slots (null if not encrypted).
+export async function syncContext(env) {
+  const cfg = config(env);
+  const files = await listTransactions(cfg);
+  const encrypted = files.others.includes("encrypted");
+  const docKey = encrypted ? await documentKey(cfg, env, files.listedUrl) : null;
+  return { cfg, files, docKey, encrypted };
+}
+
 async function download(cfg, file, docKey) {
   const res = await davFetch(cfg, file.url);
   if (!res.ok) throw new UserError(`Downloading ${file.name} failed (HTTP ${res.status}).`);

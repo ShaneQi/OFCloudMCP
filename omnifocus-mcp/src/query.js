@@ -1,5 +1,6 @@
 // Read-only queries over the replayed model, formatted as plain text.
 import { UserError } from "./errors.js";
+import { inspectSync } from "./inspect.js";
 
 const DAY = 86_400_000;
 
@@ -501,6 +502,19 @@ export const TOOLS = [
         `Folders: ${Object.keys(ix.model.folders).length}`,
         `Time zone: ${ix.tz}`,
       ].join("\n");
+    },
+  },
+  {
+    name: "inspect_sync",
+    title: "Inspect sync folder",
+    description:
+      "Diagnostics: list the raw transaction files, how they chain, the devices' .client records, " +
+      "the encryption key types, and raw transaction XML. For troubleshooting the connector.",
+    inputSchema: OBJ({
+      xml_chars: { type: "integer", minimum: 200, maximum: 50000, description: "Most XML characters to show (default 6000)." },
+    }),
+    run(_ix, a, _data, { env }) {
+      return inspectSync(env, { xml_chars: argInt(a.xml_chars, 6000, 200, 50000) });
     },
   },
 ];

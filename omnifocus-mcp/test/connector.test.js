@@ -90,7 +90,7 @@ test("initialize and tools/list", async () => {
   assert.equal(init.body.result.protocolVersion, "2025-06-18");
   const list = await rpc("tools/list", {});
   const names = list.body.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ["list_inbox", "list_due", "list_flagged", "list_projects", "get_project", "search_tasks", "list_tags", "get_task", "sync_status"]);
+  assert.deepEqual(names, ["list_inbox", "list_due", "list_flagged", "list_projects", "get_project", "search_tasks", "list_tags", "get_task", "sync_status", "inspect_sync"]);
   assert.ok(list.body.result.tools.every((t) => t.annotations.readOnlyHint));
 });
 
@@ -204,4 +204,18 @@ test("reads an encrypted database", async () => {
   const bad = await callWith({ ...ENV, OF_PASSPHRASE: "wrong" }, "list_inbox");
   assert.equal(bad.isError, true);
   assert.match(bad.content[0].text, /passphrase is wrong/);
+});
+
+test("inspect_sync reports chain, keys and raw XML", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = new URL("./fixtures/encrypted.ofocus/", import.meta.url);
+  resetCache();
+  files = {};
+  for (const n of readdirSync(dir)) files[n] = readFileSync(new URL(n, dir));
+  installFakeDav();
+  const text = (await callWith(ENV, "inspect_sync", { xml_chars: 300 })).content[0].text;
+  assert.match(text, /Transaction files: 3/);
+  assert.match(text, /parents…\+own id:\n  consistent: true; heads: ccc/);
+  assert.match(text, /Key slots: ActiveAES_CTR_HMAC#7/);
+  assert.match(text, /A task insert as OmniFocus wrote it/);
 });
