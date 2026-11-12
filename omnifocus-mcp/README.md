@@ -64,6 +64,12 @@ account key: add the JSON key as the repository secret **`GCP_SA_KEY`**
 Artifact Registry Writer role on the `images` repository. To change the
 destination, edit the `env:` block at the top of the workflow.
 
+On `main` the workflow then deploys the new image to the Cloud Run service
+`omnifocus-mcp` in `us-south1` (`gcloud run services update --image`, so its
+env vars, secrets and volumes are kept). For that, the key's service account
+also needs **Cloud Run Developer** on the service and **Service Account User**
+on the service's runtime account (`omnifocus-mcp-run`).
+
 ## Cloudflare Workers (alternative; needs the Workers Paid plan)
 
 ### Setup in the browser with Workers Builds

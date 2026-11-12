@@ -6,6 +6,11 @@
 #
 # Tags: "latest" and "sha-<commit>" on main; the version on v* git tags.
 # Pull requests are built but not pushed.
+#
+# On main, it then deploys the new image to the Cloud Run service below
+# (only the image changes; env vars, secrets and volumes are kept). The key's
+# service account needs Cloud Run Developer on the service and Service Account
+# User on the service's runtime account.
 name: Container image
 
 on:
@@ -30,6 +35,8 @@ env:
   GAR_PROJECT_ID: serverless-509006
   GAR_REPOSITORY: images
   GAR_IMAGE: omnifocus-mcp
+  CLOUD_RUN_SERVICE: omnifocus-mcp
+  CLOUD_RUN_REGION: us-south1
 
 jobs:
   test:
@@ -80,7 +87,8 @@ jobs:
             type=sha,format=short
             type=semver,pattern={{version}}
             type=ref,event=pr
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: omnifocus-mcp
           platforms: linux/amd64,linux/arm64
@@ -91,3 +99,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Authenticate to Google Cloud
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Update the Cloud Run service to this image
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --project "$GAR_PROJECT_ID" --region "$CLOUD_RUN_REGION" \
+            --image "$GAR_REGISTRY/$GAR_PROJECT_ID/$GAR_REPOSITORY/$GAR_IMAGE@${{ steps.build.outputs.digest }}" \
+            --quiet
