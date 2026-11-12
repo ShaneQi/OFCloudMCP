@@ -219,3 +219,9 @@ test("inspect_sync reports chain, keys and raw XML", async () => {
   assert.match(text, /Key slots: ActiveAES_CTR_HMAC#7/);
   assert.match(text, /A task insert as OmniFocus wrote it/);
 });
+
+test("inspect_sync find returns matching raw elements", async () => {
+  const text = (await callWith(ENV, "inspect_sync", { find: "Bulk item 1499 ", limit: 2 })).content[0].text;
+  assert.match(text, /<task id="big1499">/);
+  assert.doesNotMatch(text, /big1498/);
+});

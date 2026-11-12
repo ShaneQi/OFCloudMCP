@@ -512,9 +512,15 @@ export const TOOLS = [
       "the encryption key types, and raw transaction XML. For troubleshooting the connector.",
     inputSchema: OBJ({
       xml_chars: { type: "integer", minimum: 200, maximum: 50000, description: "Most XML characters to show (default 6000)." },
+      find: { type: "string", description: "Instead of the overview, show raw elements (task, context, task-to-tag, …) whose XML matches this regular expression." },
+      limit: { type: "integer", minimum: 1, maximum: 20, description: "With find: most elements to show (default 3)." },
     }),
     run(_ix, a, _data, { env }) {
-      return inspectSync(env, { xml_chars: argInt(a.xml_chars, 6000, 200, 50000) });
+      return inspectSync(env, {
+        xml_chars: argInt(a.xml_chars, 6000, 200, 50000),
+        find: argStr(a.find, "find"),
+        limit: argInt(a.limit, 3, 1, 20),
+      });
     },
   },
 ];

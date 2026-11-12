@@ -20,7 +20,32 @@ function show(v, depth = 0) {
   return s.length > 120 ? s.slice(0, 120) + "…" : s;
 }
 
-export async function inspectSync(env, { xml_chars = 6000 } = {}) {
+// Elements of the newest transaction whose XML matches `pattern` (a regex),
+// e.g. "<due>2" or "task-to-tag". Returns up to `limit` whole elements.
+async function findElements(env, pattern, limit, xml_chars) {
+  const { cfg, files, docKey } = await syncContext(env);
+  let re;
+  try {
+    re = new RegExp(pattern);
+  } catch (e) {
+    return `Invalid pattern: ${e.message}`;
+  }
+  const out = [];
+  for (const f of [...files].reverse()) {
+    const xml = readContentsXml(await fetchFile(cfg, f.url, f.name, docKey));
+    const el = /<(task|context|folder|task-to-tag|perspective|setting|attachment|alarm)\s[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g;
+    let m;
+    while ((m = el.exec(xml)) && out.length < limit) {
+      if (re.test(m[0])) out.push(`(${f.name})\n${m[0].replace(/<preview-image>[^<]*<\/preview-image>/g, "<preview-image>…</preview-image>")}`);
+    }
+    if (out.length >= limit) break;
+  }
+  const text = out.length ? out.join("\n\n") : `No element matches /${pattern}/.`;
+  return text.length > xml_chars ? text.slice(0, xml_chars) + "\n…(truncated)" : text;
+}
+
+export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 3 } = {}) {
+  if (find) return findElements(env, find, limit, xml_chars);
   const { cfg, files, docKey, encrypted } = await syncContext(env);
   const names = files.map((f) => f.name);
   const out = [];
