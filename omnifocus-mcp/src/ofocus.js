@@ -64,6 +64,11 @@ function txt(v) {
 }
 const ref = (v) => (v && typeof v === "object" ? v["@_idref"] ?? null : null);
 const bool = (v) => txt(v) === "true";
+// Dates or flags where "false"/empty means "not set" (e.g. <hidden>false</hidden>).
+const flagOrDate = (v) => {
+  const t = txt(v);
+  return t == null || t === "false" || t === "0" ? null : t;
+};
 
 function pick(el, out, key, xmlKey, conv) {
   if (has(el, xmlKey)) out[key] = conv(el[xmlKey]);
@@ -79,13 +84,15 @@ function normTask(el) {
   pick(el, o, "flagged", "flagged", bool);
   pick(el, o, "start", "start", txt);
   pick(el, o, "due", "due", txt);
-  pick(el, o, "completed", "completed", txt);
-  pick(el, o, "hidden", "hidden", txt); // drop date
+  pick(el, o, "completed", "completed", flagOrDate);
+  pick(el, o, "hidden", "hidden", flagOrDate); // drop date
   pick(el, o, "added", "added", txt);
   pick(el, o, "modified", "modified", txt);
   pick(el, o, "estimate", "estimated-minutes", txt);
+  pick(el, o, "planned", "planned", txt);
   pick(el, o, "rank", "rank", txt);
   pick(el, o, "order", "order", txt);
+  pick(el, o, "repeat", "repetition-rule", txt);
   if (has(el, "project")) o.project = normProject(el.project);
   return o;
 }
@@ -103,7 +110,7 @@ function normContext(el) {
   const o = {};
   pick(el, o, "name", "name", txt);
   pick(el, o, "parent", "context", ref);
-  pick(el, o, "hidden", "hidden", txt);
+  pick(el, o, "hidden", "hidden", flagOrDate);
   pick(el, o, "onHold", "prohibits-next-action", bool);
   pick(el, o, "rank", "rank", txt);
   return o;
@@ -113,7 +120,7 @@ function normFolder(el) {
   const o = {};
   pick(el, o, "name", "name", txt);
   pick(el, o, "parent", "folder", ref);
-  pick(el, o, "hidden", "hidden", txt);
+  pick(el, o, "hidden", "hidden", flagOrDate);
   pick(el, o, "rank", "rank", txt);
   return o;
 }

@@ -464,6 +464,8 @@ export const TOOLS = [
       };
       dateLine("Defer until", own(t.start), i.effStart);
       dateLine("Due", own(t.due), i.effDue);
+      if (own(t.planned) != null) out.push(`Planned: ${ix.fmt(own(t.planned))}`);
+      if (t.repeat) out.push(`Repeats: ${t.repeat}`);
       if (t.flagged) out.push("Flagged: yes");
       else if (i.effFlagged) out.push("Flagged: inherited from a parent");
       if (t.estimate) out.push(`Estimate: ${t.estimate} min`);

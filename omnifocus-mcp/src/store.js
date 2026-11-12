@@ -24,7 +24,7 @@ export function resetCache() {
   memo = null;
 }
 
-function config(env) {
+export function config(env) {
   for (const key of ["OFOCUS_URL", "WEBDAV_USER", "WEBDAV_PASS"]) {
     if (!env[key]) throw new UserError(`The server is missing its ${key} secret.`);
   }
@@ -35,7 +35,7 @@ function config(env) {
   return { base, auth: "Basic " + btoa(bin) };
 }
 
-async function listTransactions(cfg) {
+export async function listTransactions(cfg) {
   const res = await fetch(cfg.base, {
     method: "PROPFIND",
     headers: { Authorization: cfg.auth, Depth: "1", "Content-Type": "application/xml; charset=utf-8" },

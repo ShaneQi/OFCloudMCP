@@ -160,3 +160,20 @@ test("reports bad WebDAV credentials as a tool error", async () => {
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /rejected the username or password/);
 });
+
+test('"false" in <hidden> or <completed> does not mark items dropped or done', async () => {
+  resetCache();
+  files = {
+    "20261105000000=hhh.zip": zip(doc(`
+      <folder id="f9"><folder/><name>Work</name><hidden>false</hidden></folder>
+      <context id="c9"><context/><name>Office</name><hidden>false</hidden></context>
+      <task id="p9"><task/><project><folder idref="f9"/><status>active</status></project><name>Report</name><hidden>false</hidden></task>
+      <task id="t9"><task idref="p9"/><project/><name>Draft</name><context idref="c9"/><hidden>false</hidden><completed/></task>`)),
+  };
+  installFakeDav();
+  const projects = (await call("list_projects")).content[0].text;
+  assert.match(projects, /Work \/ Report · active · 1 remaining/);
+  const tags = (await call("list_tags")).content[0].text;
+  assert.match(tags, /Office · 1 remaining/);
+  assert.doesNotMatch(tags, /dropped/);
+});
