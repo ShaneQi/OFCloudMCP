@@ -9,7 +9,31 @@ Tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
 `get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`.
 Nothing writes to your database.
 
-## Setup in the browser only (no computer needed)
+## Setup with GitHub Actions (no computer needed)
+
+`.github/workflows/deploy.yml` (at the repository root) runs the tests on every
+push and pull request, and deploys the Worker on each push to `main` that
+touches `omnifocus-mcp/`, or when run by hand from the Actions tab.
+
+1. In Cloudflare: **My Profile → API Tokens → Create Token**, use the
+   **Edit Cloudflare Workers** template, and pick your account. Copy the token.
+   Your **Account ID** is on the Workers & Pages overview page.
+2. In GitHub: **Settings → Secrets and variables → Actions → New repository
+   secret**, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Until both
+   exist, the deploy job skips with a warning instead of failing.
+3. Run the workflow (Actions → Deploy Worker → Run workflow) or push to `main`.
+   The first run creates the Worker `omnifocus-mcp`.
+4. In Cloudflare, open the Worker → **Settings → Variables and Secrets** and add
+   four values of type **Secret**: `OFOCUS_URL`, `WEBDAV_USER`, `WEBDAV_PASS`,
+   `ACCESS_TOKEN` (see step 4 of the terminal setup for what each is). They
+   survive later deploys, and the WebDAV password never passes through GitHub.
+   Until `ACCESS_TOKEN` is set, the Worker refuses every request.
+5. Optional KV cache: **Storage & Databases → KV → Create** a namespace,
+   put its id in `wrangler.toml` (uncomment the `[[kv_namespaces]]` lines) and
+   push; the next deploy binds it.
+6. Continue at step 6 of the terminal setup (test, then add the connector in Claude).
+
+## Setup in the browser with Workers Builds (alternative)
 
 This deploys straight from the GitHub repository with Cloudflare Workers Builds.
 

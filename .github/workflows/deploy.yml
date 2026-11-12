@@ -1,0 +1,82 @@
+# Tests and deploys the OmniFocus MCP Worker to Cloudflare.
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   API token from the "Edit Cloudflare Workers" template
+#   CLOUDFLARE_ACCOUNT_ID  your Cloudflare account id
+# The Worker's own secrets (OFOCUS_URL, WEBDAV_USER, WEBDAV_PASS, ACCESS_TOKEN)
+# are set once in the Cloudflare dashboard and survive every deploy, so the
+# WebDAV password never passes through GitHub.
+name: Deploy Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "omnifocus-mcp/**"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    paths:
+      - "omnifocus-mcp/**"
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: omnifocus-mcp
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: omnifocus-mcp/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Check the Worker bundles
+        run: npx wrangler deploy --dry-run --outdir dist
+
+  deploy:
+    needs: test
+    # Pull requests are only tested; deploys come from main or a manual run.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare secrets are set
+        id: creds
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: .
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$ACCOUNT" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; skipping deploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.creds.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: omnifocus-mcp/package-lock.json
+      - run: npm ci
+        if: steps.creds.outputs.ready == 'true'
+      - name: Deploy
+        if: steps.creds.outputs.ready == 'true'
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
