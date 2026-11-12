@@ -18,7 +18,7 @@ const parser = new XMLParser({
 });
 
 export function newModel() {
-  return { tasks: {}, contexts: {}, folders: {}, taskToTag: {} };
+  return { tasks: {}, contexts: {}, folders: {}, taskToTag: {}, settings: {} };
 }
 
 export function readContentsXml(bytes) {
@@ -37,6 +37,16 @@ export function applyTransaction(model, xml) {
   for (const el of root.context ?? []) applyOp(model.contexts, el, normContext);
   for (const el of root.task ?? []) applyOp(model.tasks, el, normTask);
   for (const el of root["task-to-tag"] ?? []) applyOp(model.taskToTag, el, normLink);
+  model.settings ??= {};
+  for (const el of root.setting ?? []) {
+    const id = el?.["@_id"];
+    if (!id) continue;
+    if (el["@_op"] === "delete") delete model.settings[id];
+    else {
+      const v = el.plist && typeof el.plist === "object" ? el.plist.string ?? el.plist.integer ?? null : null;
+      if (v != null) model.settings[id] = txt(v);
+    }
+  }
   return model;
 }
 
@@ -129,6 +139,7 @@ function normLink(el) {
   const o = {};
   pick(el, o, "task", "task", ref);
   pick(el, o, "context", "context", ref);
+  pick(el, o, "rankInTask", "rank-in-task", txt);
   return o;
 }
 
@@ -139,6 +150,7 @@ export function noteText(v) {
   if (!raw.trim()) return null;
   if (!raw.includes("<")) return decodeEntities(raw).trim() || null;
   const lines = raw
+    .replace(/<p\s*\/>/g, "<p></p>") // empty paragraph = empty line
     .split(/<\/p>/)
     .map((p) => [...p.matchAll(/<lit>([\s\S]*?)<\/lit>/g)].map((m) => decodeEntities(m[1])).join(""));
   return lines.join("\n").trim() || null;

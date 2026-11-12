@@ -1,9 +1,11 @@
 // Minimal stateless MCP server over Streamable HTTP (JSON responses only).
 import { UserError } from "./errors.js";
 import { loadModel } from "./store.js";
-import { TOOLS, makeIndex } from "./query.js";
+import { TOOLS as READ_TOOLS, makeIndex } from "./query.js";
+import { WRITE_TOOLS } from "./writetools.js";
+import { writeMode } from "./write.js";
 
-export const writesEnabled = (env) => String(env.ALLOW_WRITES ?? "").toLowerCase() === "true";
+const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS];
 
 const SUPPORTED_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -43,7 +45,9 @@ async function handleMessage(msg, env, ctx) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "omnifocus-webdav", title: "OmniFocus (read-only)", version: "0.1.0" },
         instructions:
-          "Read-only access to the user's OmniFocus database, synced over WebDAV. " +
+          "Access to the user's OmniFocus database, synced over WebDAV. Read tools are safe; " +
+          "add_task, edit_task, complete_task and drop_task change the user's real database (each call " +
+          "writes one sync transaction), so only use them when the user asks for that change. " +
           "Results show ids as [id:…]; pass them to get_task or get_project for details.",
       });
     }
@@ -51,15 +55,18 @@ async function handleMessage(msg, env, ctx) {
       return ok(msg.id, {});
     case "tools/list":
       return ok(msg.id, {
-        tools: TOOLS.filter((t) => !t.write || writesEnabled(env)).map(({ name, title, description, inputSchema, write }) => ({
-          name, title, description, inputSchema,
+        tools: TOOLS.map(({ name, title, description, inputSchema, write, destructive }) => ({
+          name, title, inputSchema,
+          description: write && writeMode(env) !== "on"
+            ? `${description} (Writing is currently disabled on this server, so this only previews.)`
+            : description,
           annotations: write
-            ? { title, readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+            ? { title, readOnlyHint: false, destructiveHint: !!destructive, idempotentHint: false, openWorldHint: false }
             : { title, readOnlyHint: true, openWorldHint: false },
         })),
       });
     case "tools/call": {
-      const tool = TOOLS.find((t) => t.name === msg.params?.name && (!t.write || writesEnabled(env)));
+      const tool = TOOLS.find((t) => t.name === msg.params?.name);
       if (!tool) return fail(msg.id, -32602, `Unknown tool: ${msg.params?.name}`);
       return ok(msg.id, await callTool(tool, msg.params.arguments ?? {}, env, ctx));
     }

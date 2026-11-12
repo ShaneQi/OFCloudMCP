@@ -6,9 +6,43 @@ container on your own server (recommended), or on Cloudflare Workers. Your
 WebDAV password stays on that server; Claude only holds a separate access
 token.
 
-Tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
-`get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`.
-Nothing writes to your database.
+Read tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
+`get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`,
+`inspect_sync` (diagnostics).
+
+Write tools (off unless `ALLOW_WRITES=true`; see "Writing" below):
+`add_task`, `edit_task`, `complete_task`, `drop_task`.
+
+## Writing
+
+The write tools add one sync transaction per change, in the format OmniFocus
+4.10 writes (checked against a real database with `inspect_sync`):
+
+- `add_task`: a new action in the inbox or an active project, with note,
+  existing tags, defer/due/planned dates, flag and estimate.
+- `edit_task`: change name, note, dates, flag, estimate, tags, or move an
+  action to another project or the inbox. Only the given fields change.
+- `complete_task` / `drop_task`: complete or drop an action (`undo: true`
+  reverses). Repeating actions and projects are refused: do those in
+  OmniFocus, which has to schedule the next repeat.
+
+Safety:
+
+- **Off by default.** Without `ALLOW_WRITES=true` the tools only preview the
+  transaction. `dry_run: true` previews even when writing is on.
+- Every transaction is chained after the current head, encrypted with the
+  database's active key, then decrypted, unzipped and replayed by the
+  connector's own reader before upload; if anything reads back differently,
+  nothing is written.
+- It refuses to write when the folder has more than one unmerged sync branch
+  or an unexpected chain.
+- Upload goes to a temporary name and is moved into place (WebDAV `MOVE`,
+  no overwrite), so devices never see a partial file.
+- Nothing is ever deleted: dropping is OmniFocus' own reversible "dropped".
+
+Before turning writes on, back up the database (OmniFocus on the Mac:
+File → Back Up Database), then try one `add_task` and check that it appears
+on every device after they sync.
 
 ## Running on a VPS (container)
 
@@ -33,6 +67,7 @@ log in on the VPS with a personal access token that has `read:packages`:
        # OF_PASSPHRASE=<database passphrase, if not the account password>
        # TIMEZONE=America/Chicago
        # REFRESH_MINUTES=10
+       # ALLOW_WRITES=true   (enables add_task/edit_task/complete_task/drop_task)
 
 2. Start it with `compose.example.yml` (copy it to `compose.yml`), or:
 

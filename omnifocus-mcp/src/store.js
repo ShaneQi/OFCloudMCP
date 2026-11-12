@@ -6,7 +6,7 @@ import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
 import { davFetch, resetDigest } from "./dav.js";
 import { isEncryptedFile, unlockDocumentKey, decryptFile } from "./crypto.js";
 
-const CACHE_KEY = "model-v1";
+const CACHE_KEY = "model-v2"; // bump when the model's shape changes
 const TRANSACTION = /^\d{14}=.+\.zip$/;
 
 const PROPFIND_BODY =

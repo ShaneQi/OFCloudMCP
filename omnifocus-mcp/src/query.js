@@ -147,7 +147,7 @@ function fmtMaybe(ix, s) {
   return ms == null ? s : ix.fmt(ms);
 }
 
-function line(ix, t, { showProject = true, indent = 0 } = {}) {
+export function line(ix, t, { showProject = true, indent = 0 } = {}) {
   const i = ix.info(t);
   const bits = [t.name || "(untitled)"];
   if (i.isProject) bits.push("project");
@@ -173,11 +173,11 @@ function listOut(title, lines, extra = "") {
 }
 
 // ---------- argument helpers ----------
-const OBJ = (properties = {}, required = []) => ({
+export const OBJ = (properties = {}, required = []) => ({
   type: "object", properties, required, additionalProperties: false,
 });
 
-function argStr(v, name, required = false) {
+export function argStr(v, name, required = false) {
   if (v == null || v === "") {
     if (required) throw new UserError(`"${name}" is required.`);
     return null;
@@ -185,15 +185,15 @@ function argStr(v, name, required = false) {
   if (typeof v !== "string") throw new UserError(`"${name}" must be a string.`);
   return v.trim();
 }
-function argInt(v, def, min, max) {
+export function argInt(v, def, min, max) {
   if (v == null) return def;
   const n = Number(v);
   if (!Number.isFinite(n)) throw new UserError("Expected a number.");
   return Math.min(max, Math.max(min, Math.round(n)));
 }
-const argBool = (v, def) => (typeof v === "boolean" ? v : def);
+export const argBool = (v, def) => (typeof v === "boolean" ? v : def);
 
-function resolve(items, query, display, kind) {
+export function resolve(items, query, display, kind) {
   const q = query.toLowerCase();
   const byId = items.find((t) => t.id === query);
   if (byId) return byId;
@@ -206,7 +206,7 @@ function resolve(items, query, display, kind) {
   throw new UserError(`"${query}" matches ${matches.length} ${kind}s. Use an id:\n${list}`);
 }
 
-function projectStatus(ix, p) {
+export function projectStatus(ix, p) {
   if (p.completed || p.project.status === "done") return "completed";
   if (ix.info(p).closed) return "dropped";
   if (p.project.status === "inactive") return "on_hold";
