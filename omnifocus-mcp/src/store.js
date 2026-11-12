@@ -42,7 +42,15 @@ export async function listTransactions(cfg) {
     body: PROPFIND_BODY,
   });
   if (res.status === 401 || res.status === 403) {
-    throw new UserError(`The WebDAV server rejected the username or password (HTTP ${res.status}).`);
+    const asks = res.headers.get("WWW-Authenticate");
+    const scheme = asks ? asks.trim().split(/\s+/)[0] : null;
+    let hint = "";
+    if (scheme && scheme.toLowerCase() !== "basic") {
+      hint = ` The server asks for ${scheme} authentication; this connector sends Basic.`;
+    } else if (scheme) {
+      hint = " The server asks for Basic authentication, so check WEBDAV_USER, WEBDAV_PASS and OFOCUS_URL.";
+    }
+    throw new UserError(`The WebDAV server rejected the username or password (HTTP ${res.status}).${hint}`);
   }
   if (res.status === 404) throw new UserError("No OmniFocus.ofocus folder was found at OFOCUS_URL (HTTP 404).");
   if (!res.ok) throw new UserError(`Listing the WebDAV folder failed (HTTP ${res.status}).`);
