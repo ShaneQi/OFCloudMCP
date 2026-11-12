@@ -243,3 +243,50 @@ export async function decryptFile(name, bytes, slotBytes) {
   if (!eq(fileMac, bytes.subarray(end))) throw new Error(`${name}: file integrity check failed`);
   return out.subarray(0, outPos);
 }
+
+// Encrypts a file with the database's active AES-CTR+HMAC key, in the same
+// format decryptFile reads (and OmniFocus writes).
+export async function encryptFile(bytes, slotBytes) {
+  const slot = parseSlots(slotBytes).find((s) => s.type === SLOT.ACTIVE_CTR);
+  if (!slot || slot.data.length !== 32) throw new Error("The database has no active AES-CTR+HMAC key to write with.");
+  const aes = await subtle.importKey("raw", slot.data.subarray(0, 16), "AES-CTR", false, ["encrypt"]);
+  const mac = await hmacKey(slot.data.subarray(16, 32));
+
+  const header = new Uint8Array(MAGIC.length + 4);
+  header.set(MAGIC);
+  const hv = new DataView(header.buffer);
+  hv.setUint16(MAGIC.length, 2); // key info length: just the key id
+  hv.setUint16(MAGIC.length + 2, slot.id);
+  const pad = (16 - (header.length % 16)) % 16;
+
+  const parts = [header, new Uint8Array(pad)];
+  const fileMacInput = [new Uint8Array([1])];
+  const segments = Math.max(1, Math.ceil(bytes.length / SEG_PAGE));
+  for (let idx = 0; idx < segments; idx++) {
+    const plain = bytes.subarray(idx * SEG_PAGE, (idx + 1) * SEG_PAGE);
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(SEG_IV));
+    const counter = new Uint8Array(16);
+    counter.set(iv);
+    const ct = new Uint8Array(await subtle.encrypt({ name: "AES-CTR", counter, length: 32 }, aes, plain));
+    const macIn = new Uint8Array(SEG_IV + 4 + ct.length);
+    macIn.set(iv);
+    new DataView(macIn.buffer).setUint32(SEG_IV, idx);
+    macIn.set(ct, SEG_IV + 4);
+    const segMac = new Uint8Array(await subtle.sign("HMAC", mac, macIn)).subarray(0, SEG_MAC);
+    fileMacInput.push(segMac);
+    parts.push(iv, segMac, ct);
+  }
+  const macAll = concat(fileMacInput);
+  parts.push(new Uint8Array(await subtle.sign("HMAC", mac, macAll)));
+  return concat(parts);
+}
+
+function concat(arrays) {
+  const out = new Uint8Array(arrays.reduce((n, a) => n + a.length, 0));
+  let o = 0;
+  for (const a of arrays) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+}
