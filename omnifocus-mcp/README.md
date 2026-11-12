@@ -1,9 +1,10 @@
 # OmniFocus connector for Claude (read-only MCP server)
 
 A remote MCP server that reads your OmniFocus database from your WebDAV sync
-folder. It runs on Cloudflare Workers, so nothing runs on your own devices.
-Your WebDAV password stays in Cloudflare's encrypted secrets; Claude only
-holds a separate access token.
+folder (including Omni Sync Server and encrypted databases). Run it as a
+container on your own server (recommended), or on Cloudflare Workers. Your
+WebDAV password stays on that server; Claude only holds a separate access
+token.
 
 Tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
 `get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`.
