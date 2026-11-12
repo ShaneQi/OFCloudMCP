@@ -13,6 +13,10 @@ TIMEZONE = "America/Chicago"
 # login) plus the key file use up to ~6. A large database is read over several
 # requests; the cron below keeps it moving. Raise it on a paid plan.
 MAX_FETCH = "40"
+# PBKDF2 rounds per run when unlocking an encrypted database. OmniFocus uses
+# over a million; ~10,000 fits the free plan's 10 ms CPU, so unlocking is
+# spread over many cron runs. On Workers Paid, set 2000000 (one request).
+PBKDF2_ROUNDS_PER_RUN = "10000"
 # The cron re-checks WebDAV when the cache is older than this.
 REFRESH_MINUTES = "15"
 

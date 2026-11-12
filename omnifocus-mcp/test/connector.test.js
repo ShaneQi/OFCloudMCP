@@ -178,29 +178,38 @@ test('"false" in <hidden> or <completed> does not mark items dropped or done', a
   assert.doesNotMatch(tags, /dropped/);
 });
 
-test("reads an encrypted database (fixture made by an independent Python encryptor)", async () => {
+async function callWith(env, name, args = {}) {
+  const res = await worker.fetch(new Request("https://w.example/mcp", {
+    method: "POST",
+    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+  }), env, ctx);
+  return (await res.json()).result;
+}
+
+test("reads an encrypted database, unlocking the key over several runs", async () => {
   const { readdirSync, readFileSync } = await import("node:fs");
-  const dir = new URL("./fixtures/encrypted.ofocus/", import.meta.url);
+  const dir = new URL("./fixtures/encrypted.ofocus/", import.meta.url); // 200,000 PBKDF2-SHA256 rounds
   resetCache();
   files = {};
   for (const n of readdirSync(dir)) files[n] = readFileSync(new URL(n, dir));
   installFakeDav();
-  const status = (await call("sync_status")).content[0].text;
+  const env = { ...ENV, PBKDF2_ROUNDS_PER_RUN: "150000" };
+  const first = await callWith(env, "sync_status");
+  assert.equal(first.isError, true);
+  assert.match(first.content[0].text, /Unlocking your encrypted OmniFocus database: 75% \(150,000 of 200,000/);
+
+  const status = (await callWith(env, "sync_status")).content[0].text;
   assert.match(status, /Encrypted: yes/);
   assert.match(status, /Transaction files: 3/);
-  const inbox = (await call("list_inbox")).content[0].text;
+  const inbox = (await callWith(env, "list_inbox")).content[0].text;
   assert.match(inbox, /Inbox \(1500\)/);
   assert.match(inbox, /Bulk item 1499/);
 
   resetCache();
-  const bad = await worker.fetch(new Request("https://w.example/mcp", {
-    method: "POST",
-    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_inbox", arguments: {} } }),
-  }), { ...ENV, OF_PASSPHRASE: "wrong" }, ctx);
-  const r = (await bad.json()).result;
-  assert.equal(r.isError, true);
-  assert.match(r.content[0].text, /passphrase is wrong/);
+  const bad = await callWith({ ...ENV, PBKDF2_ROUNDS_PER_RUN: "1000000", OF_PASSPHRASE: "wrong" }, "list_inbox");
+  assert.equal(bad.isError, true);
+  assert.match(bad.content[0].text, /passphrase is wrong/);
 });
 
 test("loads a large database over several requests, with progress in KV", async () => {

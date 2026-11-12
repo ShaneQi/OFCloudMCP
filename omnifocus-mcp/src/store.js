@@ -4,7 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { UserError } from "./errors.js";
 import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
 import { davFetch, resetDigest } from "./dav.js";
-import { isEncryptedFile, unlockDocumentKey, decryptFile } from "./crypto.js";
+import { isEncryptedFile, unlockStep, decryptFile } from "./crypto.js";
 
 const CACHE_KEY = "model-v1";
 const TRANSACTION = /^\d{14}=.+\.zip$/;
@@ -94,28 +94,61 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
 const b64 = (u8) => btoa(String.fromCharCode(...u8));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-// Unlocks the database's file keys. PBKDF2 is slow on purpose, so the result
-// is kept in memory and (if bound) in KV, keyed by a hash of the "encrypted"
-// file; a password change rewrites that file and so forces a fresh unlock.
+// Unlocks the database's file keys. PBKDF2 is slow on purpose (OmniFocus
+// uses over a million rounds), so it runs at most PBKDF2_ROUNDS_PER_RUN
+// rounds per call and saves its progress; the result is kept in memory and
+// KV, keyed by a hash of the "encrypted" file, so a password change (which
+// rewrites that file) forces a fresh unlock. Returns the slots, or
+// { pending: message } while unlocking is still in progress.
 async function documentKey(cfg, env, listedUrl) {
   const dir = listedUrl.endsWith("/") ? listedUrl : listedUrl + "/";
   const res = await davFetch(cfg, new URL("encrypted", dir).toString());
   if (!res.ok) throw new UserError(`Downloading the "encrypted" key file failed (HTTP ${res.status}).`);
   const meta = new Uint8Array(await res.arrayBuffer());
   const id = hex(await crypto.subtle.digest("SHA-256", meta));
-  if (docKeyMemo?.id === id) return docKeyMemo.slots;
+  if (docKeyMemo?.id === id && docKeyMemo.slots) return { slots: docKeyMemo.slots };
   const kvKey = `dockey-v1:${id}`;
-  let slots = null;
+  const progressKey = `unlock-v1:${id}`;
   if (env.OF_CACHE) {
     const saved = await env.OF_CACHE.get(kvKey);
-    if (saved) slots = unb64(saved);
+    if (saved) {
+      docKeyMemo = { id, slots: unb64(saved) };
+      return { slots: docKeyMemo.slots };
+    }
   }
-  if (!slots) {
-    slots = await unlockDocumentKey(meta, env.OF_PASSPHRASE || env.WEBDAV_PASS);
-    if (env.OF_CACHE) await env.OF_CACHE.put(kvKey, b64(slots));
+  let state = docKeyMemo?.id === id ? docKeyMemo.state : null;
+  if (!state && env.OF_CACHE) state = await env.OF_CACHE.get(progressKey, "json");
+
+  const budget = Number(env.PBKDF2_ROUNDS_PER_RUN ?? 10000);
+  let r;
+  try {
+    r = await unlockStep(meta, env.OF_PASSPHRASE || env.WEBDAV_PASS, state, budget);
+  } catch (e) {
+    docKeyMemo = null;
+    if (env.OF_CACHE) await env.OF_CACHE.delete(progressKey);
+    throw e;
   }
-  docKeyMemo = { id, slots };
-  return slots;
+  if (r.slots) {
+    docKeyMemo = { id, slots: r.slots };
+    if (env.OF_CACHE) {
+      await env.OF_CACHE.put(kvKey, b64(r.slots));
+      await env.OF_CACHE.delete(progressKey);
+    }
+    return { slots: r.slots };
+  }
+  docKeyMemo = { id, state: r.state };
+  if (env.OF_CACHE) await env.OF_CACHE.put(progressKey, JSON.stringify(r.state));
+  const runs = Math.ceil((r.rounds - r.done) / budget);
+  return {
+    pending:
+      `Unlocking your encrypted OmniFocus database: ${Math.floor((100 * r.done) / r.rounds)}% ` +
+      `(${r.done.toLocaleString("en-US")} of ${r.rounds.toLocaleString("en-US")} key-derivation rounds, ` +
+      `${budget.toLocaleString("en-US")} per run). ` +
+      (env.OF_CACHE
+        ? `This continues in the background every minute; about ${runs} more run(s). ` +
+          "On the Workers Paid plan, raise PBKDF2_ROUNDS_PER_RUN to 2000000 to finish in one request."
+        : "Bind the OF_CACHE KV namespace so progress is kept between requests."),
+  };
 }
 
 const isPrefix = (a, b) => a.length <= b.length && a.every((n, i) => b[i] === n);
@@ -175,7 +208,15 @@ export async function loadModel(env, ctx, { background = false } = {}) {
   const batch = files.slice(done, done + max);
   const now = new Date().toISOString();
   if (batch.length) {
-    const docKey = encrypted ? await documentKey(cfg, env, files.listedUrl) : null;
+    let docKey = null;
+    if (encrypted) {
+      const k = await documentKey(cfg, env, files.listedUrl);
+      if (k.pending) {
+        if (background) return { partial: true, message: k.pending };
+        throw new UserError(k.pending);
+      }
+      docKey = k.slots;
+    }
     const xmls = await Promise.all(batch.map((f) => download(cfg, f, docKey)));
     try {
       for (const xml of xmls) applyTransaction(model, xml);
