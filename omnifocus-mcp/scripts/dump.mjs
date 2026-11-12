@@ -24,6 +24,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { XMLParser } from "fast-xml-parser";
 import { config, listTransactions } from "../src/store.js";
+import { davFetch } from "../src/dav.js";
 import { newModel, applyTransaction, readContentsXml } from "../src/ofocus.js";
 import { makeIndex, TOOLS } from "../src/query.js";
 
@@ -57,7 +58,7 @@ if (localDir) {
   for (const f of list) {
     const dest = path.join(filesDir, f.name);
     if (fs.existsSync(dest)) continue;
-    const res = await fetch(f.url, { headers: { Authorization: cfg.auth } });
+    const res = await davFetch(cfg, f.url);
     if (!res.ok) throw new Error(`GET ${f.name}: HTTP ${res.status}`);
     fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
     fetched++;

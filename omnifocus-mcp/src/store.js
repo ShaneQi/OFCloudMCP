@@ -3,6 +3,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { UserError } from "./errors.js";
 import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
+import { davFetch, resetDigest } from "./dav.js";
 
 const CACHE_KEY = "model-v1";
 const TRANSACTION = /^\d{14}=.+\.zip$/;
@@ -22,6 +23,7 @@ let memo = null; // { files: string[], model, builtAt }
 
 export function resetCache() {
   memo = null;
+  resetDigest();
 }
 
 export function config(env) {
@@ -29,26 +31,23 @@ export function config(env) {
     if (!env[key]) throw new UserError(`The server is missing its ${key} secret.`);
   }
   const base = env.OFOCUS_URL.endsWith("/") ? env.OFOCUS_URL : env.OFOCUS_URL + "/";
-  const bytes = new TextEncoder().encode(`${env.WEBDAV_USER}:${env.WEBDAV_PASS}`);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return { base, auth: "Basic " + btoa(bin) };
+  return { base, user: env.WEBDAV_USER, pass: env.WEBDAV_PASS };
 }
 
 export async function listTransactions(cfg) {
-  const res = await fetch(cfg.base, {
+  const res = await davFetch(cfg, cfg.base, {
     method: "PROPFIND",
-    headers: { Authorization: cfg.auth, Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
+    headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
     body: PROPFIND_BODY,
   });
   if (res.status === 401 || res.status === 403) {
     const asks = res.headers.get("WWW-Authenticate");
     const scheme = asks ? asks.trim().split(/\s+/)[0] : null;
     let hint = "";
-    if (scheme && scheme.toLowerCase() !== "basic") {
-      hint = ` The server asks for ${scheme} authentication; this connector sends Basic.`;
+    if (scheme && !["basic", "digest"].includes(scheme.toLowerCase())) {
+      hint = ` The server asks for ${scheme} authentication, which this connector does not support.`;
     } else if (scheme) {
-      hint = " The server asks for Basic authentication, so check WEBDAV_USER, WEBDAV_PASS and OFOCUS_URL.";
+      hint = ` The server uses ${scheme} authentication, so check WEBDAV_USER, WEBDAV_PASS and OFOCUS_URL.`;
     }
     throw new UserError(`The WebDAV server rejected the username or password (HTTP ${res.status}).${hint}`);
   }
@@ -75,7 +74,7 @@ export async function listTransactions(cfg) {
 }
 
 async function download(cfg, file) {
-  const res = await fetch(file.url, { headers: { Authorization: cfg.auth } });
+  const res = await davFetch(cfg, file.url);
   if (!res.ok) throw new UserError(`Downloading ${file.name} failed (HTTP ${res.status}).`);
   return readContentsXml(new Uint8Array(await res.arrayBuffer()));
 }
