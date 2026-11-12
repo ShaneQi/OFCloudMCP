@@ -4,7 +4,7 @@
 import { unzipSync, strFromU8 } from "fflate";
 import { XMLParser } from "fast-xml-parser";
 
-const TOP_LEVEL = new Set(["task", "context", "folder", "task-to-tag", "perspective", "setting"]);
+const TOP_LEVEL = new Set(["task", "context", "folder", "task-to-tag", "perspective", "setting", "attachment"]);
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -13,12 +13,13 @@ const parser = new XMLParser({
   parseAttributeValue: false,
   trimValues: true,
   removeNSPrefix: true,
-  stopNodes: ["*.note"], // keep rich-text notes as raw XML; parsed by noteText()
+  // keep rich-text notes as raw XML (parsed by noteText); skip attachment previews
+  stopNodes: ["*.note", "*.preview-image"],
   isArray: (name, jpath) => TOP_LEVEL.has(name) && jpath === `omnifocus.${name}`,
 });
 
 export function newModel() {
-  return { tasks: {}, contexts: {}, folders: {}, taskToTag: {}, settings: {} };
+  return { tasks: {}, contexts: {}, folders: {}, taskToTag: {}, settings: {}, attachments: {} };
 }
 
 export function readContentsXml(bytes) {
@@ -37,6 +38,8 @@ export function applyTransaction(model, xml) {
   for (const el of root.context ?? []) applyOp(model.contexts, el, normContext);
   for (const el of root.task ?? []) applyOp(model.tasks, el, normTask);
   for (const el of root["task-to-tag"] ?? []) applyOp(model.taskToTag, el, normLink);
+  model.attachments ??= {};
+  for (const el of root.attachment ?? []) applyOp(model.attachments, el, normAttachment);
   model.settings ??= {};
   for (const el of root.setting ?? []) {
     const id = el?.["@_id"];
@@ -88,6 +91,7 @@ function normTask(el) {
   const o = {};
   pick(el, o, "name", "name", txt);
   pick(el, o, "note", "note", noteText);
+  pick(el, o, "noteXml", "note", rawNote); // original rich text, for copies
   pick(el, o, "parent", "task", ref);
   pick(el, o, "context", "context", ref);
   pick(el, o, "inbox", "inbox", bool);
@@ -103,6 +107,14 @@ function normTask(el) {
   pick(el, o, "rank", "rank", txt);
   pick(el, o, "order", "order", txt);
   pick(el, o, "repeat", "repetition-rule", txt);
+  pick(el, o, "repeatMethod", "repetition-method", txt);
+  pick(el, o, "repeatSchedule", "repetition-schedule-type", txt);
+  pick(el, o, "repeatAnchor", "repetition-anchor-date", txt);
+  pick(el, o, "catchUp", "catch-up-automatically", bool);
+  pick(el, o, "nextClone", "next-clone-identifier", txt);
+  pick(el, o, "completedByChildren", "completed-by-children", bool);
+  for (const [k, x] of [["dueAlarm", "due-date-alarm-policy"], ["deferAlarm", "defer-date-alarm-policy"],
+    ["latestAlarm", "latest-time-to-start-alarm-policy"], ["plannedAlarm", "planned-date-alarm-policy"]]) pick(el, o, k, x, txt);
   if (has(el, "project")) o.project = normProject(el.project);
   return o;
 }
@@ -113,7 +125,25 @@ function normProject(v) {
     folder: ref(v.folder),
     status: txt(v.status) ?? "active", // active | inactive (on hold) | done | dropped
     singleton: bool(v.singleton),
+    lastReview: txt(v["last-review"]),
+    nextReview: txt(v["next-review"]),
+    reviewInterval: txt(v["review-interval"]),
   };
+}
+
+function rawNote(v) {
+  if (v == null) return null;
+  const raw = typeof v === "string" ? v : String(v["#text"] ?? "");
+  return raw.trim() ? raw.trim() : null;
+}
+
+function normAttachment(el) {
+  const o = {};
+  pick(el, o, "task", "task", ref);
+  pick(el, o, "name", "name", txt);
+  pick(el, o, "dataId", "data-identifier", txt);
+  pick(el, o, "added", "added", txt);
+  return o;
 }
 
 function normContext(el) {

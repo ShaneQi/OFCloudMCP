@@ -83,7 +83,7 @@ export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 
       const items = entries.filter((n) => n !== "data");
       out.push("", `data/ folder: ${items.length} entries (HTTP ${res.status})`);
       for (const n of items.slice(0, 8)) out.push(`  ${n}`);
-      const first = items.find((n) => !n.endsWith("/"));
+      const first = items.find((n) => /^data-[0-9a-f]{64}\.zip$/.test(n));
       if (first) {
         const r = await davFetch(cfg, new URL(encodeURIComponent(first), dataUrl).toString());
         const raw = new Uint8Array(await r.arrayBuffer());
@@ -93,6 +93,16 @@ export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 
         const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", plain))].map((b) => b.toString(16).padStart(2, "0")).join("");
         out.push(`  first file: ${raw.length} bytes, ${enc ? "encrypted" : "not encrypted"}, plaintext ${plain.length} bytes, sha256 ${sha}`);
         out.push(`  plaintext starts: ${[...plain.subarray(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(" ")}`);
+        try {
+          const { unzipSync } = await import("fflate");
+          const entries = unzipSync(plain);
+          for (const [n, b] of Object.entries(entries)) {
+            const h = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+            out.push(`  zip entry ${JSON.stringify(n)}: ${b.length} bytes, sha256 ${h}`);
+          }
+        } catch (e) {
+          out.push(`  not a readable zip: ${e.message}`);
+        }
       }
     } catch (e) {
       out.push("", `data/ folder: could not list (${e.message})`);
