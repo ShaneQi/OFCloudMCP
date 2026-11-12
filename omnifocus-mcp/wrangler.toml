@@ -1,6 +1,8 @@
 name = "omnifocus-mcp"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
+# Keep variables added in the Cloudflare dashboard when deploying.
+keep_vars = true
 
 [vars]
 # Time zone used to display dates and to read "floating" OmniFocus dates.
