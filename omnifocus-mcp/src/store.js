@@ -135,7 +135,20 @@ async function mapLimit(items, limit, fn) {
 
 const isPrefix = (a, b) => a.length <= b.length && a.every((n, i) => b[i] === n);
 
+// Loads run one at a time, so a slow first load is not repeated by requests
+// arriving meanwhile; they then reuse its result.
+let inflight = null;
 export async function loadModel(env, ctx) {
+  while (inflight) await inflight.catch(() => {});
+  inflight = loadOnce(env, ctx);
+  try {
+    return await inflight;
+  } finally {
+    inflight = null;
+  }
+}
+
+async function loadOnce(env, ctx) {
   const cfg = config(env);
   const files = await listTransactions(cfg);
   if (!files.length) {

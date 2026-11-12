@@ -1,0 +1,18 @@
+# Example: run the connector on a VPS with Docker Compose.
+#   cp compose.example.yml compose.yml
+#   create .env next to it (see README "Running on a VPS"), chmod 600 .env
+#   docker compose up -d
+# Put your HTTPS reverse proxy in front of 127.0.0.1:8787 and use
+# https://<your-domain>/mcp as the connector URL in Claude.
+services:
+  omnifocus-mcp:
+    image: ghcr.io/shaneqi/ofcloudmcp:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8787:8787" # only reachable through your proxy
+    volumes:
+      - omnifocus-cache:/data
+
+volumes:
+  omnifocus-cache:

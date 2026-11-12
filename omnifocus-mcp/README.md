@@ -1,4 +1,4 @@
-# OmniFocus connector for Claude (read-only, Cloudflare Workers)
+# OmniFocus connector for Claude (read-only MCP server)
 
 A remote MCP server that reads your OmniFocus database from your WebDAV sync
 folder. It runs on Cloudflare Workers, so nothing runs on your own devices.
@@ -9,11 +9,56 @@ Tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
 `get_project`, `search_tasks`, `list_tags`, `get_task`, `sync_status`.
 Nothing writes to your database.
 
-## Setup with GitHub Actions (no computer needed)
+## Running on a VPS (container)
 
-`.github/workflows/deploy.yml` (at the repository root) runs the tests on every
-push and pull request, and deploys the Worker on each push to `main` that
-touches `omnifocus-mcp/`, or when run by hand from the Actions tab.
+The connector is also a plain-HTTP Node server in a container image, built
+and pushed to GitHub Container Registry by `.github/workflows/container.yml`
+on every push to `main`:
+
+    ghcr.io/shaneqi/ofcloudmcp:latest      (also :sha-<commit>, amd64 + arm64)
+
+The package is private by default; either make it public (GitHub → your
+profile → Packages → ofcloudmcp → Package settings → Change visibility), or
+log in on the VPS with a personal access token that has `read:packages`:
+`echo <token> | docker login ghcr.io -u <github-user> --password-stdin`.
+
+1. On the VPS, create `.env` (and `chmod 600 .env`):
+
+       OFOCUS_URL=https://sync.omnigroup.com/<account>/OmniFocus.ofocus/
+       WEBDAV_USER=<account>
+       WEBDAV_PASS=<password>
+       ACCESS_TOKEN=<random token>
+       # optional:
+       # OF_PASSPHRASE=<database passphrase, if not the account password>
+       # TIMEZONE=America/Chicago
+       # REFRESH_MINUTES=10
+
+2. Start it with `compose.example.yml` (copy it to `compose.yml`), or:
+
+       docker run -d --name omnifocus-mcp --restart unless-stopped \
+         --env-file .env -p 127.0.0.1:8787:8787 -v omnifocus-cache:/data \
+         ghcr.io/shaneqi/ofcloudmcp:latest
+
+3. Point your HTTPS reverse proxy at `127.0.0.1:8787`. The connector URL in
+   Claude is `https://<your-domain>/mcp`, with the request header
+   `Authorization: Bearer <ACCESS_TOKEN>`. `GET /healthz` returns `ok`.
+
+On start it loads (and, if encrypted, unlocks) the database in the
+background; `docker logs omnifocus-mcp` shows `startup load: … files`. It
+then re-reads new transactions every `REFRESH_MINUTES` (default 10), so
+requests rarely wait. The parsed database and unlocked file keys are kept in
+the `/data` volume (files readable only by the container user), so a restart
+does not repeat the slow first load. That volume holds your decrypted task
+data: keep it on the VPS and out of backups you share.
+
+Update: `docker compose pull && docker compose up -d`.
+
+## Cloudflare Workers (alternative; needs the Workers Paid plan)
+
+### Setup with GitHub Actions
+
+`.github/workflows/deploy.yml` (at the repository root) tests and deploys the
+Worker when run by hand from the Actions tab (**Deploy Worker → Run workflow**).
 
 1. In Cloudflare: **My Profile → API Tokens → Create Token**, use the
    **Edit Cloudflare Workers** template, and pick your account. Copy the token.
@@ -21,7 +66,7 @@ touches `omnifocus-mcp/`, or when run by hand from the Actions tab.
 2. In GitHub: **Settings → Secrets and variables → Actions → New repository
    secret**, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Until both
    exist, the deploy job skips with a warning instead of failing.
-3. Run the workflow (Actions → Deploy Worker → Run workflow) or push to `main`.
+3. Run the workflow (Actions → Deploy Worker → Run workflow).
    The first run creates the Worker `omnifocus-mcp`.
 4. In Cloudflare, open the Worker → **Settings → Variables and Secrets** and add
    four values of type **Secret**: `OFOCUS_URL`, `WEBDAV_USER`, `WEBDAV_PASS`,
@@ -32,7 +77,7 @@ touches `omnifocus-mcp/`, or when run by hand from the Actions tab.
    creates the namespace automatically.
 6. Continue at step 6 of the terminal setup (test, then add the connector in Claude).
 
-## Setup in the browser with Workers Builds (alternative)
+### Setup in the browser with Workers Builds
 
 This deploys straight from the GitHub repository with Cloudflare Workers Builds.
 
@@ -53,7 +98,7 @@ This deploys straight from the GitHub repository with Cloudflare Workers Builds.
 
 Every push to the production branch redeploys the Worker.
 
-## One-time setup from a terminal (any computer with Node.js 18+)
+### One-time setup from a terminal (any computer with Node.js 18+)
 
 1. Unzip this folder, open a terminal in it, and run:
 

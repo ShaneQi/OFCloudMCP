@@ -1,4 +1,4 @@
-# Tests and deploys the OmniFocus MCP Worker to Cloudflare.
+# Tests and deploys the OmniFocus MCP Worker to Cloudflare (manual runs only).
 #
 # Needs two repository secrets (Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN   API token from the "Edit Cloudflare Workers" template
@@ -9,14 +9,8 @@
 name: Deploy Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "omnifocus-mcp/**"
-      - ".github/workflows/deploy.yml"
-  pull_request:
-    paths:
-      - "omnifocus-mcp/**"
+  # Manual only: the connector now runs as a container on a VPS (see
+  # container.yml). Run this from the Actions tab to deploy to Cloudflare.
   workflow_dispatch: {}
 
 concurrency:
@@ -47,8 +41,6 @@ jobs:
 
   deploy:
     needs: test
-    # Pull requests are only tested; deploys come from main or a manual run.
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Check Cloudflare secrets are set
