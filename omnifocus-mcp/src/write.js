@@ -170,6 +170,18 @@ export function contextInsertXml(c) {
   );
 }
 
+export const contextDeleteXml = (id) => `  <context id="${esc(id)}" op="delete"/>`;
+
+// changes use XML field names: context (parent id), name, rank, hidden,
+// prohibits-next-action. Same delta layout as task updates.
+export function contextUpdateXml(id, added, modified, changes) {
+  const parts = [];
+  if ("context" in changes) parts.push(idref("context", changes.context));
+  parts.push(leaf("added", added), leaf("modified", modified));
+  for (const t of ["name", "rank", "hidden", "prohibits-next-action"]) if (t in changes) parts.push(leaf(t, changes[t]));
+  return `  <context id="${esc(id)}" op="update">${parts.join("")}</context>`;
+}
+
 export function attachmentInsertXml(a) {
   return (
     `  <attachment id="${esc(a.id)}">\n    ${idref("task", a.task)}\n    ${leaf("added", a.added)}\n` +

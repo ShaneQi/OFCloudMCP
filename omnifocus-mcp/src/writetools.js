@@ -6,7 +6,7 @@ import { OBJ, argStr, argInt, argBool, line } from "./query.js";
 import {
   commit, newId, utcStamp, floatingDate, rankAfter, linkRankAfter, wallParts,
   taskInsertXml, taskUpdateXml, linkInsertXml, linkDeleteXml, taskDeleteXml,
-  contextInsertXml, attachmentInsertXml, attachmentDeleteXml, noteWithAttachment, noteWithoutAttachment,
+  contextInsertXml, contextUpdateXml, contextDeleteXml, attachmentInsertXml, attachmentDeleteXml, noteWithAttachment, noteWithoutAttachment,
 } from "./write.js";
 import { zipSync, unzipSync } from "fflate";
 import { syncContext, fetchFile } from "./store.js";
@@ -706,6 +706,110 @@ export const WRITE_TOOLS = [
         check: (m) => (m.attachments?.[id] ? "the attachment is still there"
           : (m.tasks[att.task]?.noteXml ?? "").includes(`refid="${id}"`) ? "the note still shows it" : null),
       }), { dryRun: argBool(a.dry_run, false) });
+    }),
+  },
+  {
+    name: "edit_tag",
+    write: true,
+    destructive: false,
+    title: "Edit tag",
+    description:
+      "Rename an OmniFocus tag, move it under another tag (parent \"\" for top level), or set its status: " +
+      "active, on_hold (its actions are unavailable) or dropped. Use dry_run to preview.",
+    inputSchema: OBJ({
+      tag: { type: "string", description: "Tag name, path (A : B) or id." },
+      name: { type: "string" },
+      parent: { type: "string", description: "New parent tag, or \"\" for top level." },
+      status: { type: "string", enum: ["active", "on_hold", "dropped"] },
+      dry_run: DRY,
+    }, ["tag"]),
+    run: run(async (ix, a, env, ctx) => {
+      const id = findTags(ix, [a.tag])[0];
+      if (!id) throw new UserError('"tag" is required.');
+      const c = ix.model.contexts[id];
+      const changes = {};
+      if ("name" in a) changes.name = argStr(a.name, "name", true);
+      let parent = c.parent ?? null;
+      if ("parent" in a) {
+        parent = a.parent ? findTags(ix, [a.parent])[0] : null;
+        for (let p = parent; p; p = ix.model.contexts[p]?.parent) {
+          if (p === id) throw new UserError("A tag cannot be moved inside itself.");
+        }
+        changes.context = parent;
+      }
+      const status = argStr(a.status, "status");
+      if (status && !["active", "on_hold", "dropped"].includes(status)) throw new UserError('"status" must be active, on_hold or dropped.');
+      if (!Object.keys(changes).length && !status) throw new UserError("Nothing to change: give name, parent or status.");
+      return commit(env, ctx, (model, now) => {
+        const stamp = utcStamp(now);
+        const ch = { ...changes };
+        if (status) {
+          ch["prohibits-next-action"] = status === "on_hold" ? "true" : "false";
+          ch.hidden = status === "dropped" ? c.hidden ?? stamp : null;
+        }
+        if ("context" in ch && (ch.context ?? null) !== (c.parent ?? null)) {
+          ch.rank = String(rankAfter(Object.values(model.contexts).filter((x) => (x.parent ?? null) === parent).map((x) => x.rank)));
+        }
+        const name = ch.name ?? c.name;
+        return {
+          elements: [contextUpdateXml(id, c.added ?? stamp, stamp, ch)],
+          summary: `Edit tag "${ix.tagPath(id)}" [id:${id}]: ${[...Object.keys(changes).map((k) => (k === "context" ? "parent" : k)), ...(status ? [`status ${status}`] : [])].join(", ")}.`,
+          check(m) {
+            const x = m.contexts[id];
+            if (!x || x.name !== name || (x.parent ?? null) !== parent) return "the tag reads back differently";
+            if (status && (!!x.onHold !== (status === "on_hold") || !!x.hidden !== (status === "dropped"))) return "its status reads back differently";
+            return null;
+          },
+        };
+      }, { dryRun: argBool(a.dry_run, false) });
+    }),
+  },
+  {
+    name: "delete_tag",
+    write: true,
+    destructive: true,
+    title: "Delete tag",
+    description:
+      "Permanently delete an OmniFocus tag and the tags inside it. Actions keep existing; they just lose those " +
+      "tags. Prefer edit_tag with status dropped unless the user asks to delete. Use dry_run to preview.",
+    inputSchema: OBJ({ tag: { type: "string", description: "Tag name, path (A : B) or id." }, dry_run: DRY }, ["tag"]),
+    run: run(async (ix, a, env, ctx) => {
+      const id = findTags(ix, [a.tag])[0];
+      if (!id) throw new UserError('"tag" is required.');
+      return commit(env, ctx, (model, now) => {
+        const stamp = utcStamp(now);
+        const ids = [];
+        const walk = (cid) => {
+          for (const c of Object.values(model.contexts).filter((x) => x.parent === cid)) walk(c.id);
+          ids.push(cid);
+        };
+        walk(id); // children before parents
+        const gone = new Set(ids);
+        const links = Object.values(model.taskToTag).filter((l) => gone.has(l.context));
+        // Actions whose first tag is going get their next remaining tag (or none) as the first tag.
+        const updates = Object.values(model.tasks)
+          .filter((t) => t.context && gone.has(t.context))
+          .map((t) => {
+            const rest = linksOf(model, t.id).filter((l) => !gone.has(l.context)).sort((x, y) => String(x.rankInTask ?? "").localeCompare(String(y.rankInTask ?? "")));
+            return { t, primary: rest[0]?.context ?? null };
+          });
+        const affected = new Set(links.map((l) => l.task));
+        return {
+          elements: [
+            ...links.map((l) => linkDeleteXml(l.id)),
+            ...updates.map(({ t, primary }) => taskUpdateXml(t.id, t.added ?? stamp, stamp, { context: primary })),
+            ...ids.map(contextDeleteXml),
+          ],
+          summary: `Delete tag "${ix.tagPath(id)}" [id:${id}]` + (ids.length > 1 ? ` and ${ids.length - 1} tag(s) inside it` : "") +
+            `; ${affected.size} item(s) lose it.`,
+          check(m) {
+            if (ids.some((x) => m.contexts[x])) return "a tag is still there";
+            if (Object.values(m.taskToTag).some((l) => gone.has(l.context))) return "an item still has the tag";
+            if (Object.values(m.tasks).some((t) => t.context && gone.has(t.context))) return "an item still has it as its first tag";
+            return null;
+          },
+        };
+      }, { dryRun: argBool(a.dry_run, false) });
     }),
   },
 ];

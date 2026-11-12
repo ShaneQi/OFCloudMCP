@@ -296,3 +296,29 @@ test("attachments: add text and image, read back, delete", async () => {
   assert.doesNotMatch(after, /packing list/);
   assert.match(after, /\[attachment: dot\]/); // the other attachment stays in the note
 });
+
+test("edit_tag and delete_tag", async () => {
+  resetCache();
+  installDav();
+  const parent = idFrom((await call(ON, "add_tag", { name: "Shops" })).text);
+  const child = idFrom((await call(ON, "add_tag", { name: "Bike shop", parent: "Shops" })).text);
+  const task = idFrom((await call(ON, "add_task", { name: "x", tags: ["Shops : Bike shop", "Errands"] })).text);
+
+  assert.match((await call(ON, "edit_tag", { tag: child, name: "Cycle shop", status: "on_hold" })).text, /^Done\./);
+  assert.match((await call(ON, "list_tags")).text, /Shops : Cycle shop · 1 remaining · on hold/);
+  assert.match((await call(ON, "edit_tag", { tag: child, parent: "" })).text, /^Done\./);
+  assert.match((await call(ON, "list_tags")).text, /^- Cycle shop · 1 remaining · on hold/m);
+  assert.match((await call(ON, "edit_tag", { tag: parent, parent: "Cycle shop" })).text, /^Done\./);
+  assert.match((await call(ON, "edit_tag", { tag: child, parent: "Cycle shop : Shops" })).text, /inside itself/);
+  assert.match((await call(ON, "edit_tag", { tag: parent, status: "dropped" })).text, /^Done\./);
+  assert.match((await call(ON, "list_tags")).text, /Cycle shop : Shops · 0 remaining · dropped/);
+
+  let r = await call(ON, "delete_tag", { tag: child, dry_run: true });
+  assert.match(r.text, /Delete tag "Cycle shop" .* and 1 tag\(s\) inside it; 1 item\(s\) lose it\./);
+  r = await call(ON, "delete_tag", { tag: child });
+  assert.match(r.text, /^Done\./, r.text);
+  const tags = (await call(ON, "list_tags")).text;
+  assert.doesNotMatch(tags, /Cycle shop|Shops/);
+  const d = (await call(ON, "get_task", { id: task })).text;
+  assert.match(d, /Tags: Errands$/m); // kept its other tag, now the first one
+});

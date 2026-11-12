@@ -90,7 +90,7 @@ test("initialize and tools/list", async () => {
   assert.equal(init.body.result.protocolVersion, "2025-06-18");
   const list = await rpc("tools/list", {});
   const names = list.body.result.tools.map((t) => t.name);
-  assert.deepEqual(names, ["list_inbox", "list_due", "list_flagged", "list_projects", "get_project", "search_tasks", "list_tags", "get_task", "sync_status", "inspect_sync", "get_attachment", "add_task", "edit_task", "complete_task", "drop_task", "add_tag", "add_project", "set_project_status", "delete_task", "add_attachment", "delete_attachment"]);
+  assert.deepEqual(names, ["list_inbox", "list_due", "list_flagged", "list_projects", "get_project", "search_tasks", "list_tags", "get_task", "sync_status", "inspect_sync", "get_attachment", "add_task", "edit_task", "complete_task", "drop_task", "add_tag", "add_project", "set_project_status", "delete_task", "add_attachment", "delete_attachment", "edit_tag", "delete_tag"]);
   const writers = names.slice(names.indexOf("add_task"));
   assert.ok(list.body.result.tools.filter((t) => !writers.includes(t.name)).every((t) => t.annotations.readOnlyHint));
   assert.ok(list.body.result.tools.filter((t) => writers.includes(t.name)).every((t) => t.annotations.readOnlyHint === false));

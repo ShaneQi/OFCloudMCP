@@ -13,7 +13,7 @@ Read tools: `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
 Write tools (off unless `ALLOW_WRITES=true`; see "Writing" below):
 `add_task`, `edit_task`, `complete_task`, `drop_task`, `add_tag`,
 `add_project`, `set_project_status`, `delete_task`, `add_attachment`,
-`delete_attachment`.
+`delete_attachment`, `edit_tag`, `delete_tag`.
 
 ## Writing
 
@@ -30,14 +30,18 @@ The write tools add one sync transaction per change, in the format OmniFocus
   moved on by the rule (fixed, or counted from completion). Supported rules:
   FREQ HOURLY/DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL, BYDAY (incl. "2WE",
   "-1FR"), BYMONTHDAY, BYMONTH, UNTIL; others (e.g. COUNT) are refused.
-- `add_tag`: a new tag, optionally inside another tag.
+- `add_tag`: a new tag, optionally inside another tag. `edit_tag`: rename,
+  move, or set active / on hold / dropped. `delete_tag`: delete a tag and
+  the tags inside it; items keep existing and just lose those tags.
 - `add_project`: a parallel, sequential or single-action project, optionally
   in a folder, active or on hold. `set_project_status`: active, on hold,
   completed or dropped.
 - `delete_task`: permanently delete an action or project with its
   sub-actions, tag links and attachments (prefer dropping).
 - `add_attachment` / `delete_attachment` / `get_attachment`: attachments are
-  stored like OmniFocus does, as `data/data-<sha256>.zip` (encrypted).
+  stored like OmniFocus does, as `data/data-<sha256>.zip` (encrypted), and
+  shown at the end of the item's note (`<cell refid=…>`), where OmniFocus
+  displays them.
 
 Safety:
 
@@ -51,7 +55,7 @@ Safety:
   or an unexpected chain.
 - Upload goes to a temporary name and is moved into place (WebDAV `MOVE`,
   no overwrite), so devices never see a partial file.
-- Only `delete_task` and `delete_attachment` remove anything; everything else
+- Only `delete_task`, `delete_tag` and `delete_attachment` remove anything; everything else
   is reversible (dropping is OmniFocus' own "dropped").
 
 Before turning writes on, back up the database (OmniFocus on the Mac:
