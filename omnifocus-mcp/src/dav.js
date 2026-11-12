@@ -69,24 +69,47 @@ export function digestHeader({ user, pass, method, uri, challenge, nc, cnonce })
   return "Digest " + parts.join(", ");
 }
 
-// fetch() with the WebDAV credentials in cfg ({ user, pass }).
+// fetch() with the WebDAV credentials in cfg ({ user, pass }). Follows
+// redirects itself so each hop gets its own authentication. The response has
+// extra fields: davUrl (final URL) and davAuth (how the last attempt signed in).
 export async function davFetch(cfg, url, init = {}) {
+  let res;
+  for (let hop = 0; hop < 5; hop++) {
+    res = await authed(cfg, url, init);
+    const loc = res.status >= 300 && res.status < 400 ? res.headers.get("Location") : null;
+    if (!loc) break;
+    await res.body?.cancel();
+    url = new URL(loc, url).toString();
+  }
+  res.davUrl = url;
+  return res;
+}
+
+async function authed(cfg, url, init) {
   const u = new URL(url);
   const key = `${cfg.user}@${u.origin}`;
   const method = (init.method ?? "GET").toUpperCase();
   const uri = u.pathname + u.search;
 
-  const send = (auth) => fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: auth } });
-  const withDigest = (state) => {
+  const send = (auth) =>
+    fetch(url, { ...init, redirect: "manual", headers: { ...(init.headers ?? {}), Authorization: auth } });
+  const withDigest = async (state) => {
     state.nc += 1;
-    return send(digestHeader({
+    const r = await send(digestHeader({
       user: cfg.user, pass: cfg.pass, method, uri, challenge: state.challenge,
       nc: state.nc, cnonce: randomBytes(8).toString("hex"),
     }));
+    r.davAuth = `Digest ${state.challenge.params.algorithm ?? "MD5"} at ${u.host}`;
+    return r;
   };
 
   let state = challenges.get(key);
-  let res = state ? await withDigest(state) : await send(basic(cfg.user, cfg.pass));
+  let res;
+  if (state) res = await withDigest(state);
+  else {
+    res = await send(basic(cfg.user, cfg.pass));
+    res.davAuth = `Basic at ${u.host}`;
+  }
   if (res.status !== 401) return res;
 
   // New or expired challenge: answer the one in this 401, once.

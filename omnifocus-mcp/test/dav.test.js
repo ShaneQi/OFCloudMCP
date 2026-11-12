@@ -41,3 +41,25 @@ test("switches to Digest when the server asks for it, and reuses the challenge",
   assert.equal(r2.status, 200);
   assert.deepEqual(seen, ["Basic", "Digest", "Digest"]);
 });
+
+test("follows a redirect and answers the new host's Digest challenge", async () => {
+  resetDigest();
+  const md5 = (s) => createHash("md5").update(s).digest("hex");
+  const hosts = [];
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url);
+    hosts.push(`${u.host} ${init.headers.Authorization.split(" ")[0]}`);
+    assert.equal(init.redirect, "manual");
+    if (u.host === "sync.example.com") return new Response("", { status: 302, headers: { Location: "https://sync4.example.com" + u.pathname } });
+    const auth = init.headers.Authorization;
+    const challenge = new Response("", { status: 401, headers: { "WWW-Authenticate": 'Digest realm="r", nonce="n2", qop="auth"' } });
+    if (!auth.startsWith("Digest ")) return challenge;
+    const p = Object.fromEntries([...auth.matchAll(/(\w+)="?([^",]*)"?/g)].map((m) => [m[1], m[2]]));
+    const ok = p.response === md5(`${md5("u:r:pw")}:n2:${p.nc}:${p.cnonce}:auth:${md5(`PROPFIND:${u.pathname}`)}`);
+    return ok ? new Response("<multistatus/>", { status: 207 }) : challenge;
+  };
+  const r = await davFetch({ user: "u", pass: "pw" }, "https://sync.example.com/u/OmniFocus.ofocus/", { method: "PROPFIND", body: "x" });
+  assert.equal(r.status, 207);
+  assert.equal(r.davUrl, "https://sync4.example.com/u/OmniFocus.ofocus/");
+  assert.deepEqual(hosts, ["sync.example.com Basic", "sync4.example.com Basic", "sync4.example.com Digest"]);
+});

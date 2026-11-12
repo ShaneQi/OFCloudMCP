@@ -43,11 +43,12 @@ export async function listTransactions(cfg) {
   if (res.status === 401 || res.status === 403) {
     const asks = res.headers.get("WWW-Authenticate");
     const scheme = asks ? asks.trim().split(/\s+/)[0] : null;
-    let hint = "";
+    let hint = ` Tried ${res.davAuth ?? "Basic"}.`;
+    if (cfg.base !== res.davUrl) hint += ` (OFOCUS_URL redirected to ${res.davUrl}.)`;
     if (scheme && !["basic", "digest"].includes(scheme.toLowerCase())) {
-      hint = ` The server asks for ${scheme} authentication, which this connector does not support.`;
-    } else if (scheme) {
-      hint = ` The server uses ${scheme} authentication, so check WEBDAV_USER, WEBDAV_PASS and OFOCUS_URL.`;
+      hint += ` The server asks for ${scheme} authentication, which this connector does not support.`;
+    } else {
+      hint += " Check WEBDAV_USER, WEBDAV_PASS and OFOCUS_URL.";
     }
     throw new UserError(`The WebDAV server rejected the username or password (HTTP ${res.status}).${hint}`);
   }
@@ -59,7 +60,7 @@ export async function listTransactions(cfg) {
   for (const r of doc?.multistatus?.response ?? []) {
     const href = typeof r.href === "string" ? r.href : r.href?.["#text"];
     if (!href) continue;
-    const url = new URL(href, cfg.base);
+    const url = new URL(href, res.davUrl ?? cfg.base);
     const last = url.pathname.split("/").filter(Boolean).pop() ?? "";
     let name;
     try {
