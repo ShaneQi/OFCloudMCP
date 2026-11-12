@@ -4,6 +4,8 @@ import { syncContext, fetchFile } from "./store.js";
 import { analyzeChain, analyzeChainOwnFirst } from "./chain.js";
 import { parsePlist, keyInfo } from "./crypto.js";
 import { readContentsXml } from "./ofocus.js";
+import { davFetch } from "./dav.js";
+import { isEncryptedFile } from "./crypto.js";
 
 const SLOT_NAMES = {
   1: "ActiveAESWRAP", 2: "RetiredAESWRAP", 3: "ActiveAES_CTR_HMAC",
@@ -66,6 +68,35 @@ export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 
   out.push("", `Other entries: ${files.others.join(", ")}`);
   if (encrypted) {
     out.push(`Key slots: ${keyInfo(docKey).map((s) => `${SLOT_NAMES[s.type] ?? s.type}#${s.id} (${s.bytes} bytes)`).join(", ")}`);
+  }
+
+  if (files.others.includes("data/")) {
+    try {
+      const dataUrl = new URL("data/", files.listedUrl).toString();
+      const res = await davFetch(cfg, dataUrl, {
+        method: "PROPFIND",
+        headers: { Depth: "1", "Content-Type": "application/xml; charset=utf-8" },
+        body: '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getcontentlength/></d:prop></d:propfind>',
+      });
+      const xml = await res.text();
+      const entries = [...xml.matchAll(/<(?:\w+:)?href>([^<]+)<\/(?:\w+:)?href>/g)].map((m) => decodeURIComponent(m[1].split("/").filter(Boolean).pop()));
+      const items = entries.filter((n) => n !== "data");
+      out.push("", `data/ folder: ${items.length} entries (HTTP ${res.status})`);
+      for (const n of items.slice(0, 8)) out.push(`  ${n}`);
+      const first = items.find((n) => !n.endsWith("/"));
+      if (first) {
+        const r = await davFetch(cfg, new URL(encodeURIComponent(first), dataUrl).toString());
+        const raw = new Uint8Array(await r.arrayBuffer());
+        const enc = isEncryptedFile(raw);
+        let plain = raw;
+        if (enc && docKey) plain = await (await import("./crypto.js")).decryptFile(first, raw, docKey);
+        const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", plain))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        out.push(`  first file: ${raw.length} bytes, ${enc ? "encrypted" : "not encrypted"}, plaintext ${plain.length} bytes, sha256 ${sha}`);
+        out.push(`  plaintext starts: ${[...plain.subarray(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(" ")}`);
+      }
+    } catch (e) {
+      out.push("", `data/ folder: could not list (${e.message})`);
+    }
   }
 
   const clients = files.others.filter((n) => n.endsWith(".client"));
