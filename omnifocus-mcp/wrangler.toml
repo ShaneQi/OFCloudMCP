@@ -1,0 +1,16 @@
+name = "omnifocus-mcp"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+# Time zone used to display dates and to read "floating" OmniFocus dates.
+TIMEZONE = "America/Chicago"
+# Most transaction files downloaded in one request. Raise it on a paid plan.
+MAX_FETCH = "45"
+
+# Optional, recommended: keep the parsed database between requests.
+#   1. npx wrangler kv namespace create OF_CACHE
+#   2. Uncomment the three lines below and paste the id it prints.
+# [[kv_namespaces]]
+# binding = "OF_CACHE"
+# id = "paste-id-here"

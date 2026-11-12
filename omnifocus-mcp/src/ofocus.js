@@ -1,0 +1,149 @@
+// Parses OmniFocus transaction files (.zip containing contents.xml) and
+// replays them into a plain-object model:
+//   { tasks, contexts, folders, taskToTag } — each a map of id -> record.
+import { unzipSync, strFromU8 } from "fflate";
+import { XMLParser } from "fast-xml-parser";
+
+const TOP_LEVEL = new Set(["task", "context", "folder", "task-to-tag", "perspective", "setting"]);
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  parseTagValue: false,
+  parseAttributeValue: false,
+  trimValues: true,
+  removeNSPrefix: true,
+  stopNodes: ["*.note"], // keep rich-text notes as raw XML; parsed by noteText()
+  isArray: (name, jpath) => TOP_LEVEL.has(name) && jpath === `omnifocus.${name}`,
+});
+
+export function newModel() {
+  return { tasks: {}, contexts: {}, folders: {}, taskToTag: {} };
+}
+
+export function readContentsXml(bytes) {
+  const files = unzipSync(bytes, {
+    filter: (f) => f.name === "contents.xml" || f.name.endsWith("/contents.xml"),
+  });
+  const key = Object.keys(files)[0];
+  if (!key) throw new Error("contents.xml not found in transaction file");
+  return strFromU8(files[key]);
+}
+
+export function applyTransaction(model, xml) {
+  const root = parser.parse(xml).omnifocus;
+  if (!root || typeof root !== "object") throw new Error("Not an OmniFocus transaction");
+  for (const el of root.folder ?? []) applyOp(model.folders, el, normFolder);
+  for (const el of root.context ?? []) applyOp(model.contexts, el, normContext);
+  for (const el of root.task ?? []) applyOp(model.tasks, el, normTask);
+  for (const el of root["task-to-tag"] ?? []) applyOp(model.taskToTag, el, normLink);
+  return model;
+}
+
+function applyOp(map, el, norm) {
+  if (!el || typeof el !== "object") return;
+  const id = el["@_id"];
+  if (!id) return;
+  const op = el["@_op"];
+  if (op === "delete") {
+    delete map[id];
+    return;
+  }
+  const fields = norm(el);
+  if (op) map[id] = { ...(map[id] ?? {}), ...fields, id }; // update: merge
+  else map[id] = { ...fields, id }; // insert
+}
+
+const has = (el, key) => Object.prototype.hasOwnProperty.call(el, key);
+
+function txt(v) {
+  if (v == null) return null;
+  if (typeof v === "object") v = v["#text"] ?? "";
+  v = String(v);
+  return v === "" ? null : v;
+}
+const ref = (v) => (v && typeof v === "object" ? v["@_idref"] ?? null : null);
+const bool = (v) => txt(v) === "true";
+
+function pick(el, out, key, xmlKey, conv) {
+  if (has(el, xmlKey)) out[key] = conv(el[xmlKey]);
+}
+
+function normTask(el) {
+  const o = {};
+  pick(el, o, "name", "name", txt);
+  pick(el, o, "note", "note", noteText);
+  pick(el, o, "parent", "task", ref);
+  pick(el, o, "context", "context", ref);
+  pick(el, o, "inbox", "inbox", bool);
+  pick(el, o, "flagged", "flagged", bool);
+  pick(el, o, "start", "start", txt);
+  pick(el, o, "due", "due", txt);
+  pick(el, o, "completed", "completed", txt);
+  pick(el, o, "hidden", "hidden", txt); // drop date
+  pick(el, o, "added", "added", txt);
+  pick(el, o, "modified", "modified", txt);
+  pick(el, o, "estimate", "estimated-minutes", txt);
+  pick(el, o, "rank", "rank", txt);
+  pick(el, o, "order", "order", txt);
+  if (has(el, "project")) o.project = normProject(el.project);
+  return o;
+}
+
+function normProject(v) {
+  if (!v || typeof v !== "object" || Object.keys(v).length === 0) return null;
+  return {
+    folder: ref(v.folder),
+    status: txt(v.status) ?? "active", // active | inactive (on hold) | done | dropped
+    singleton: bool(v.singleton),
+  };
+}
+
+function normContext(el) {
+  const o = {};
+  pick(el, o, "name", "name", txt);
+  pick(el, o, "parent", "context", ref);
+  pick(el, o, "hidden", "hidden", txt);
+  pick(el, o, "onHold", "prohibits-next-action", bool);
+  pick(el, o, "rank", "rank", txt);
+  return o;
+}
+
+function normFolder(el) {
+  const o = {};
+  pick(el, o, "name", "name", txt);
+  pick(el, o, "parent", "folder", ref);
+  pick(el, o, "hidden", "hidden", txt);
+  pick(el, o, "rank", "rank", txt);
+  return o;
+}
+
+function normLink(el) {
+  const o = {};
+  pick(el, o, "task", "task", ref);
+  pick(el, o, "context", "context", ref);
+  return o;
+}
+
+// Rich text: <text><p><run><style>…</style><lit>words</lit></run></p>…</text>
+export function noteText(v) {
+  if (v == null) return null;
+  const raw = typeof v === "string" ? v : String(v["#text"] ?? "");
+  if (!raw.trim()) return null;
+  if (!raw.includes("<")) return decodeEntities(raw).trim() || null;
+  const lines = raw
+    .split(/<\/p>/)
+    .map((p) => [...p.matchAll(/<lit>([\s\S]*?)<\/lit>/g)].map((m) => decodeEntities(m[1])).join(""));
+  return lines.join("\n").trim() || null;
+}
+
+function decodeEntities(s) {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&amp;/g, "&");
+}

@@ -1,0 +1,19 @@
+{
+  "name": "omnifocus-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only MCP connector for an OmniFocus database synced over WebDAV, for Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
