@@ -1,7 +1,7 @@
 // Node entry point for running the connector on your own server (e.g. in a
 // container), instead of Cloudflare Workers. It serves the same code:
 //   POST /mcp  (Authorization: Bearer <ACCESS_TOKEN>)
-//   GET  /healthz
+//   GET  /health  (also /healthz; Cloud Run reserves paths ending in "z")
 //
 // Configuration (environment variables):
 //   OFOCUS_URL, WEBDAV_USER, WEBDAV_PASS, ACCESS_TOKEN   required
@@ -71,7 +71,7 @@ const ctx = {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.url === "/healthz") {
+    if (req.url === "/health" || req.url === "/healthz") {
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n");
       return;
     }

@@ -42,7 +42,7 @@ log in on the VPS with a personal access token that has `read:packages`:
 
 3. Point your HTTPS reverse proxy at `127.0.0.1:8787`. The connector URL in
    Claude is `https://<your-domain>/mcp`, with the request header
-   `Authorization: Bearer <ACCESS_TOKEN>`. `GET /healthz` returns `ok`.
+   `Authorization: Bearer <ACCESS_TOKEN>`. `GET /health` returns `ok`.
 
 On start it loads (and, if encrypted, unlocks) the database in the
 background; `docker logs omnifocus-mcp` shows `startup load: … files`. It
