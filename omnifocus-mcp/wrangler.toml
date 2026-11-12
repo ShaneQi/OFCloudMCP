@@ -25,6 +25,7 @@ REFRESH_MINUTES = "15"
 [[kv_namespaces]]
 binding = "OF_CACHE"
 
-# Background loading and refresh, every minute.
+# Background loading and refresh. Disabled: an empty list removes the cron
+# from Cloudflare. To turn it back on: crons = ["* * * * *"]
 [triggers]
-crons = ["* * * * *"]
+crons = []
