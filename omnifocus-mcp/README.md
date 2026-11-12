@@ -56,33 +56,11 @@ Update: `docker compose pull && docker compose up -d`.
 
 ## Cloudflare Workers (alternative; needs the Workers Paid plan)
 
-### Setup with GitHub Actions
-
-`.github/workflows/deploy.yml` (at the repository root) tests and deploys the
-Worker when run by hand from the Actions tab (**Deploy Worker → Run workflow**).
-
-1. In Cloudflare: **My Profile → API Tokens → Create Token**, use the
-   **Edit Cloudflare Workers** template, and pick your account. Copy the token.
-   Your **Account ID** is on the Workers & Pages overview page.
-2. In GitHub: **Settings → Secrets and variables → Actions → New repository
-   secret**, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Until both
-   exist, the deploy job skips with a warning instead of failing.
-3. Run the workflow (Actions → Deploy Worker → Run workflow).
-   The first run creates the Worker `omnifocus-mcp`.
-4. In Cloudflare, open the Worker → **Settings → Variables and Secrets** and add
-   four values of type **Secret**: `OFOCUS_URL`, `WEBDAV_USER`, `WEBDAV_PASS`,
-   `ACCESS_TOKEN` (see step 4 of the terminal setup for what each is). They
-   survive later deploys, and the WebDAV password never passes through GitHub.
-   Until `ACCESS_TOKEN` is set, the Worker refuses every request.
-5. The KV cache (`OF_CACHE`) is declared in `wrangler.toml`; the first deploy
-   creates the namespace automatically.
-6. Continue at step 6 of the terminal setup (test, then add the connector in Claude).
-
 ### Setup in the browser with Workers Builds
 
 This deploys straight from the GitHub repository with Cloudflare Workers Builds.
 
-1. Sign in to the Cloudflare dashboard (a free account works to start).
+1. Sign in to the Cloudflare dashboard (Workers Paid plan; see Limits below).
 2. **Workers & Pages → Create → Import a repository**. Connect GitHub, pick
    this repository, and set:
    - Project name: `omnifocus-mcp` (must match `name` in `wrangler.toml`)
