@@ -26,6 +26,7 @@ import { XMLParser } from "fast-xml-parser";
 import { config, listTransactions } from "../src/store.js";
 import { davFetch } from "../src/dav.js";
 import { newModel, applyTransaction, readContentsXml } from "../src/ofocus.js";
+import { isEncryptedFile, unlockDocumentKey, decryptFile } from "../src/crypto.js";
 import { makeIndex, TOOLS } from "../src/query.js";
 
 const args = process.argv.slice(2);
@@ -47,6 +48,7 @@ let names;
 if (localDir) {
   names = fs.readdirSync(localDir).filter((n) => TRANSACTION.test(n)).sort();
   for (const n of names) fs.copyFileSync(path.join(localDir, n), path.join(filesDir, n));
+  if (fs.existsSync(path.join(localDir, "encrypted"))) fs.copyFileSync(path.join(localDir, "encrypted"), path.join(outDir, "encrypted"));
   log(`Found ${names.length} transaction files in ${localDir}`);
 } else {
   const cfg = config(process.env);
@@ -64,9 +66,25 @@ if (localDir) {
     fetched++;
   }
   log(`Downloaded ${fetched} new file(s), ${list.length - fetched} already cached`);
+  if (list.others.includes("encrypted")) {
+    const res = await davFetch(cfg, new URL("encrypted", list.listedUrl).toString());
+    if (!res.ok) throw new Error(`GET encrypted: HTTP ${res.status}`);
+    fs.writeFileSync(path.join(outDir, "encrypted"), Buffer.from(await res.arrayBuffer()));
+  }
   for (const n of fs.readdirSync(filesDir)) if (!names.includes(n)) fs.unlinkSync(path.join(filesDir, n));
 }
 if (!names.length) throw new Error("No transaction files found.");
+
+// Encrypted database: unlock the file keys (passphrase OF_PASSPHRASE or WEBDAV_PASS).
+let docKey = null;
+const keyFile = path.join(outDir, "encrypted");
+if (fs.existsSync(keyFile)) {
+  const pass = process.env.OF_PASSPHRASE || process.env.WEBDAV_PASS;
+  if (!pass) throw new Error("The database is encrypted: set OF_PASSPHRASE (or WEBDAV_PASS).");
+  const t = performance.now();
+  docKey = await unlockDocumentKey(new Uint8Array(fs.readFileSync(keyFile)), pass);
+  log(`Unlocked the encrypted database (${(performance.now() - t).toFixed(0)} ms)`);
+}
 
 // ---------- 2. inventory of what the XML contains ----------
 const raw = new XMLParser({
@@ -124,7 +142,11 @@ const perFile = [];
 let tUnzip = 0, tParse = 0, tReplay = 0, xmlBytes = 0;
 const model = newModel();
 for (const n of names) {
-  const bytes = new Uint8Array(fs.readFileSync(path.join(filesDir, n)));
+  let bytes = new Uint8Array(fs.readFileSync(path.join(filesDir, n)));
+  if (isEncryptedFile(bytes)) {
+    if (!docKey) throw new Error(`${n} is encrypted but there is no "encrypted" key file.`);
+    bytes = await decryptFile(n, bytes, docKey);
+  }
   let t = performance.now();
   const xml = readContentsXml(bytes);
   tUnzip += performance.now() - t;
@@ -154,7 +176,7 @@ for (const n of names) {
   perFile.push({ name: n, zipBytes: bytes.length, xmlBytes: xml.length, counts });
 
   t = performance.now();
-  // time the connector's own parse + replay (the Worker does exactly this)
+  // time the connector's own parse + replay (the server does exactly this)
   applyTransaction(model, xml);
   tReplay += performance.now() - t;
 }
@@ -195,7 +217,7 @@ const r = [];
 r.push(`Files: ${names.length}  (first ${names[0]}, last ${names.at(-1)})`);
 r.push(`Root attributes: ${fmtMap(rootAttrs)}`);
 r.push(`Total zip ${(perFile.reduce((a, f) => a + f.zipBytes, 0) / 1e6).toFixed(2)} MB, XML ${(xmlBytes / 1e6).toFixed(2)} MB, model JSON ${(modelJson.length / 1e6).toFixed(2)} MB`);
-r.push(`Timings on this machine (the Worker's CPU is similar or a bit slower):`);
+r.push(`Timings on this machine:`);
 r.push(`  unzip ${tUnzip.toFixed(0)} ms, parse+replay ${tReplay.toFixed(0)} ms, JSON.parse of cached model ${tJson.toFixed(0)} ms`);
 r.push("", "== Elements (name op=…: count; child fields with counts) ==");
 for (const [label, e] of Object.entries(inv).sort()) {

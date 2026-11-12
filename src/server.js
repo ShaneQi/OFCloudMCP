@@ -1,5 +1,5 @@
-// Node entry point for running the connector on your own server (e.g. in a
-// container), instead of Cloudflare Workers. It serves the same code:
+// Node entry point: runs the connector as a plain-HTTP server (e.g. in a
+// container behind an HTTPS reverse proxy). Routes:
 //   POST /mcp  (Authorization: Bearer <ACCESS_TOKEN>)
 //   GET  /health  (also /healthz; Cloud Run reserves paths ending in "z")
 //
@@ -18,14 +18,14 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import worker from "./index.js";
+import app from "./index.js";
 import { loadModel } from "./store.js";
 
 const PORT = Number(process.env.PORT || 8787);
 const CACHE_DIR = process.env.CACHE_DIR ?? "/data";
 const REFRESH_MINUTES = Number(process.env.REFRESH_MINUTES ?? 10);
 
-// A tiny file-backed stand-in for the Workers KV binding (get/put/delete).
+// A tiny file-backed key-value cache (get/put/delete), passed to the handler as env.OF_CACHE.
 function fileKv(dir) {
   const file = (key) => path.join(dir, crypto.createHash("sha256").update(key).digest("hex"));
   return {
@@ -83,7 +83,7 @@ const server = http.createServer(async (req, res) => {
       body: hasBody ? req : undefined,
       duplex: hasBody ? "half" : undefined,
     });
-    const response = await worker.fetch(request, env, ctx);
+    const response = await app.fetch(request, env, ctx);
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   } catch (e) {

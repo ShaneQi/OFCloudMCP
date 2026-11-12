@@ -1,4 +1,5 @@
-// Cloudflare Worker entry point: checks the connector token, then serves MCP at /mcp.
+// HTTP handler (fetch-style Request -> Response): checks the connector token,
+// then serves MCP at POST /mcp. src/server.js runs it as a Node HTTP server.
 import { handleMcp } from "./mcp.js";
 
 function tokenMatches(request, env) {

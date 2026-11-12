@@ -161,7 +161,7 @@ export async function unlockDocumentKey(metaBytes, passphrase) {
   }
 }
 
-// WebCrypto PBKDF2 where allowed; Workers refuses more than 100,000 rounds
+// WebCrypto PBKDF2 where allowed; some runtimes refuse more than 100,000 rounds
 // (OmniFocus uses over a million), so fall back to the pure-JS version.
 async function deriveKey(passphrase, salt, rounds, prf) {
   try {

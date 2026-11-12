@@ -3,18 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-only MCP connector for an OmniFocus database synced over WebDAV, for Cloudflare Workers",
+  "description": "Remote MCP server for an OmniFocus database synced over WebDAV (incl. Omni Sync Server and encrypted databases)",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "dump": "NODE_USE_ENV_PROXY=1 node scripts/dump.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.0",
     "fflate": "^0.8.2"
-  },
-  "devDependencies": {
-    "wrangler": "^4.0.0"
   }
 }

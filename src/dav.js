@@ -1,7 +1,7 @@
 // WebDAV requests with HTTP Basic or Digest authentication (RFC 7616 / 2617).
 // Sends Basic first; if the server answers 401 with a Digest challenge, it
 // switches to Digest for this and later requests (the challenge is kept per
-// Worker instance, with an increasing nonce count).
+// process, with an increasing nonce count).
 import { createHash, randomBytes } from "node:crypto";
 
 const HASHES = { md5: "md5", "md5-sess": "md5", "sha-256": "sha256", "sha-256-sess": "sha256" };

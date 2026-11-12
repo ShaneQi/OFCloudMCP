@@ -1,5 +1,5 @@
 // Loads the OmniFocus database from WebDAV, applying only new transaction
-// files when a cached copy (in memory or KV) is still valid.
+// files when a cached copy (in memory or the OF_CACHE store) is still valid.
 import { XMLParser } from "fast-xml-parser";
 import { UserError } from "./errors.js";
 import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
@@ -113,7 +113,7 @@ const b64 = (u8) => btoa(String.fromCharCode(...u8));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 // Unlocks the database's file keys. PBKDF2 is slow on purpose, so the result
-// is kept in memory and (if bound) in KV, keyed by a hash of the "encrypted"
+// is kept in memory and (if present) in OF_CACHE, keyed by a hash of the "encrypted"
 // file; a password change rewrites that file and so forces a fresh unlock.
 async function documentKey(cfg, env, listedUrl) {
   const dir = listedUrl.endsWith("/") ? listedUrl : listedUrl + "/";
@@ -136,8 +136,8 @@ async function documentKey(cfg, env, listedUrl) {
   return slots;
 }
 
-// Runs fn over items with at most `limit` running at once (Workers allows
-// six simultaneous outgoing connections per request).
+// Runs fn over items with at most `limit` running at once, to be gentle
+// with the WebDAV server.
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -184,7 +184,7 @@ async function loadOnce(env, ctx) {
   let source = "memory cache";
   if (!base && env.OF_CACHE) {
     base = await env.OF_CACHE.get(CACHE_KEY, "json");
-    source = "KV cache";
+    source = "disk cache";
   }
 
   let pending = files;

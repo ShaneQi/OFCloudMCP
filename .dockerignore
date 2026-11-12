@@ -1,5 +1,4 @@
 node_modules
-.wrangler
 .dev.vars
 .env
 dump
@@ -7,3 +6,6 @@ dist
 test
 scripts
 *.md
+.git
+.github
+compose*.yml

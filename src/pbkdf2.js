@@ -1,6 +1,6 @@
 // PBKDF2 for one output block (key length ≤ hash length), used because
-// Workers' WebCrypto and node:crypto refuse more than 100,000 rounds and
-// OmniFocus uses over a million.
+// some WebCrypto runtimes refuse more than 100,000 rounds and OmniFocus uses
+// over a million.
 //
 // SHA-1 and SHA-256 use a pure-JS HMAC with precomputed pad states (two
 // compressions per round). SHA-512 falls back to WebCrypto HMAC per round.
