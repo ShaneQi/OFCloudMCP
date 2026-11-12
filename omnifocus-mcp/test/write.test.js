@@ -270,7 +270,9 @@ test("attachments: add text and image, read back, delete", async () => {
   const aid = idFrom(r.text, "New attachment id");
   const dataFiles = Object.keys(files).filter((n) => /^data-[0-9a-f]{64}\.zip$/.test(n));
   assert.equal(dataFiles.length, 1);
-  assert.match((await call(ON, "get_task", { id: "t1" })).text, new RegExp(`Attachments: packing list\\.txt \\[attachment id:${aid}\\]`));
+  const withAtt = (await call(ON, "get_task", { id: "t1" })).text;
+  assert.match(withAtt, new RegExp(`Attachments: packing list\\.txt \\[attachment id:${aid}\\]`));
+  assert.match(withAtt, /Note:\n\[attachment: packing list\]/); // shown in the note, like OmniFocus
   r = await call(ON, "get_attachment", { id: aid });
   assert.match(r.text, /^Attachment "packing list.txt".*\n\ntube\nlevers\n$/);
 
@@ -290,5 +292,7 @@ test("attachments: add text and image, read back, delete", async () => {
   assert.equal(content[1].data, png);
 
   assert.match((await call(ON, "delete_attachment", { id: aid })).text, /^Done\./);
-  assert.doesNotMatch((await call(ON, "get_task", { id: "t1" })).text, /packing list/);
+  const after = (await call(ON, "get_task", { id: "t1" })).text;
+  assert.doesNotMatch(after, /packing list/);
+  assert.match(after, /\[attachment: dot\]/); // the other attachment stays in the note
 });

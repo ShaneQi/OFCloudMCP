@@ -6,7 +6,7 @@ import { OBJ, argStr, argInt, argBool, line } from "./query.js";
 import {
   commit, newId, utcStamp, floatingDate, rankAfter, linkRankAfter, wallParts,
   taskInsertXml, taskUpdateXml, linkInsertXml, linkDeleteXml, taskDeleteXml,
-  contextInsertXml, attachmentInsertXml, attachmentDeleteXml,
+  contextInsertXml, attachmentInsertXml, attachmentDeleteXml, noteWithAttachment, noteWithoutAttachment,
 } from "./write.js";
 import { zipSync, unzipSync } from "fflate";
 import { syncContext, fetchFile } from "./store.js";
@@ -639,7 +639,7 @@ export const WRITE_TOOLS = [
     title: "Add attachment",
     description:
       "Attach a file to an OmniFocus action or project: give text content, or base64 for binary files. " +
-      "Use dry_run to preview.",
+      "It is added at the end of the item's note, where OmniFocus shows attachments. Use dry_run to preview.",
     inputSchema: OBJ({
       id: { type: "string", description: "The action or project id." },
       filename: { type: "string", description: "File name shown in OmniFocus, e.g. notes.txt." },
@@ -666,11 +666,19 @@ export const WRITE_TOOLS = [
       return commit(env, ctx, (_model, now) => {
         const id = newId();
         const stamp = utcStamp(now);
+        const note = noteWithAttachment(t.noteXml ?? null, id, filename);
         return {
           uploads: [{ path: `data/${dataId}.zip`, bytes: zip }],
-          elements: [attachmentInsertXml({ id, task: t.id, name: filename, added: stamp, dataId })],
+          elements: [
+            attachmentInsertXml({ id, task: t.id, name: filename, added: stamp, dataId }),
+            taskUpdateXml(t.id, t.added ?? stamp, stamp, { note: { raw: note } }),
+          ],
           summary: `Attach "${filename}" (${bytes.length} bytes) to "${t.name}" [id:${t.id}]. New attachment id: ${id}`,
-          check: (m) => (m.attachments?.[id]?.dataId === dataId && m.attachments[id].task === t.id ? null : "the attachment reads back differently"),
+          check: (m) => {
+            if (m.attachments?.[id]?.dataId !== dataId || m.attachments[id].task !== t.id) return "the attachment reads back differently";
+            if (!(m.tasks[t.id]?.noteXml ?? "").includes(`refid="${id}"`)) return "the note does not show the attachment";
+            return null;
+          },
         };
       }, { dryRun: argBool(a.dry_run, false) });
     }),
@@ -686,10 +694,17 @@ export const WRITE_TOOLS = [
       const id = argStr(a.id, "id", true);
       const att = ix.model.attachments?.[id];
       if (!att) throw new UserError(`No attachment has id ${id}.`);
-      return commit(env, ctx, () => ({
-        elements: [attachmentDeleteXml(id)],
+      const owner = ix.model.tasks[att.task];
+      return commit(env, ctx, (_model, now) => ({
+        elements: [
+          attachmentDeleteXml(id),
+          ...(owner && (owner.noteXml ?? "").includes(`refid="${id}"`)
+            ? [taskUpdateXml(owner.id, owner.added ?? utcStamp(now), utcStamp(now), { note: { raw: noteWithoutAttachment(owner.noteXml, id) } })]
+            : []),
+        ],
         summary: `Remove attachment "${att.name}" [id:${id}] from "${ix.model.tasks[att.task]?.name ?? att.task}".`,
-        check: (m) => (m.attachments?.[id] ? "the attachment is still there" : null),
+        check: (m) => (m.attachments?.[id] ? "the attachment is still there"
+          : (m.tasks[att.task]?.noteXml ?? "").includes(`refid="${id}"`) ? "the note still shows it" : null),
       }), { dryRun: argBool(a.dry_run, false) });
     }),
   },

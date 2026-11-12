@@ -176,6 +176,25 @@ export function attachmentInsertXml(a) {
     `    ${leaf("name", a.name)}\n    ${leaf("data-identifier", a.dataId)}\n  </attachment>`
   );
 }
+// Notes show an attachment where they contain <cell refid="…" name="…"/>.
+export function noteWithAttachment(noteRaw, attId, filename) {
+  const name = filename.replace(/\.[^.]*$/, "") || filename;
+  const para = `<p><run><lit><cell refid="${esc(attId)}" name="${esc(name)}"/></lit></run></p>`;
+  if (noteRaw && /<\/text>\s*$/.test(noteRaw)) return noteRaw.replace(/<\/text>\s*$/, `${para}</text>`);
+  if (noteRaw && /^<text\s*\/>$/.test(noteRaw.trim())) return `<text>${para}</text>`;
+  if (noteRaw) throw new UserError("This item's note has an unexpected format; add the attachment in OmniFocus.");
+  return `<text>${para}</text>`;
+}
+
+export function noteWithoutAttachment(noteRaw, attId) {
+  if (!noteRaw) return noteRaw;
+  const cell = new RegExp(`<cell\\b[^>]*\\brefid="${attId.replace(/[^A-Za-z0-9_-]/g, "")}"[^>]*/>`, "g");
+  let out = noteRaw.replace(cell, "");
+  // drop paragraphs left empty by the removal
+  out = out.replace(/<p>(?:<run>(?:<style>[\s\S]*?<\/style>)?<lit><\/lit><\/run>)+<\/p>/g, "");
+  return /^<text>\s*<\/text>$/.test(out) ? null : out;
+}
+
 export const attachmentDeleteXml = (id) => `  <attachment id="${esc(id)}" op="delete"/>`;
 
 // changes: { field: value } using XML field names. OmniFocus writes the

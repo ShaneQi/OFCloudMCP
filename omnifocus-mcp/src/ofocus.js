@@ -190,7 +190,9 @@ export function noteText(v) {
   const lines = raw
     .replace(/<p\s*\/>/g, "<p></p>") // empty paragraph = empty line
     .split(/<\/p>/)
-    .map((p) => [...p.matchAll(/<lit>([\s\S]*?)<\/lit>/g)].map((m) => decodeEntities(m[1])).join(""));
+    .map((p) => [...p.matchAll(/<lit>([\s\S]*?)<\/lit>/g)]
+      .map((m) => decodeEntities(m[1].replace(/<cell\b[^>]*?\bname="([^"]*)"[^>]*\/>/g, "[attachment: $1]").replace(/<cell\b[^>]*\/>/g, "[attachment]")))
+      .join(""));
   return lines.join("\n").trim() || null;
 }
 
