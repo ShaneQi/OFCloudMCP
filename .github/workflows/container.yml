@@ -1,19 +1,11 @@
 # Tests, then builds the container image (amd64 + arm64) and pushes it to:
 #   - GitHub Container Registry: ghcr.io/<owner>/<repo> (built-in GITHUB_TOKEN)
-#   - Google Artifact Registry, when configured:
-#       <GAR_LOCATION>-docker.pkg.dev/<GCP_PROJECT_ID>/<GAR_REPOSITORY>/<GAR_IMAGE>
+#   - Google Artifact Registry: us-south1-docker.pkg.dev/serverless-509006/images/omnifocus-mcp
+#     (needs the repository secret GCP_SA_KEY: a service account JSON key with
+#     Artifact Registry Writer on the "images" repository)
 #
 # Tags: "latest" and "sha-<commit>" on main; the version on v* git tags.
 # Pull requests are built but not pushed.
-#
-# Artifact Registry settings (Settings → Secrets and variables → Actions):
-#   Variables: GCP_PROJECT_ID, GAR_LOCATION (e.g. us-central1),
-#              GAR_REPOSITORY (e.g. containers), GAR_IMAGE (default omnifocus-mcp)
-#   Auth, either Workload Identity Federation (recommended, no key):
-#     Variables: GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
-#   or a service account key:
-#     Secret: GCP_SA_KEY (JSON)
-# If GCP_PROJECT_ID is unset, only GHCR is used.
 name: Container image
 
 on:
@@ -32,7 +24,12 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write # Workload Identity Federation to Google Cloud
+
+env:
+  GAR_REGISTRY: us-south1-docker.pkg.dev
+  GAR_PROJECT_ID: serverless-509006
+  GAR_REPOSITORY: images
+  GAR_IMAGE: omnifocus-mcp
 
 jobs:
   test:
@@ -64,55 +61,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Artifact Registry settings
-        id: gar
-        if: github.event_name != 'pull_request' && vars.GCP_PROJECT_ID != ''
-        env:
-          PROJECT: ${{ vars.GCP_PROJECT_ID }}
-          LOCATION: ${{ vars.GAR_LOCATION }}
-          REPOSITORY: ${{ vars.GAR_REPOSITORY }}
-          IMAGE: ${{ vars.GAR_IMAGE || 'omnifocus-mcp' }}
-          WIF: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          KEY: ${{ secrets.GCP_SA_KEY }}
-        run: |
-          if [ -z "$LOCATION" ] || [ -z "$REPOSITORY" ]; then
-            echo "::error::Set GAR_LOCATION and GAR_REPOSITORY (with GCP_PROJECT_ID)."; exit 1
-          fi
-          if [ -n "$WIF" ]; then echo "auth=wif" >> "$GITHUB_OUTPUT"
-          elif [ -n "$KEY" ]; then echo "auth=key" >> "$GITHUB_OUTPUT"
-          else echo "::error::Set GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT, or the GCP_SA_KEY secret."; exit 1
-          fi
-          echo "registry=$LOCATION-docker.pkg.dev" >> "$GITHUB_OUTPUT"
-          echo "image=$LOCATION-docker.pkg.dev/$PROJECT/$REPOSITORY/$IMAGE" >> "$GITHUB_OUTPUT"
-
-      - id: gcp-wif
-        if: steps.gar.outputs.auth == 'wif'
-        uses: google-github-actions/auth@v2
+      - name: Log in to Artifact Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-          token_format: access_token
-
-      - id: gcp-key
-        if: steps.gar.outputs.auth == 'key'
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-          token_format: access_token
-
-      - uses: docker/login-action@v3
-        if: steps.gar.outputs.registry != ''
-        with:
-          registry: ${{ steps.gar.outputs.registry }}
-          username: oauth2accesstoken
-          password: ${{ steps.gcp-wif.outputs.access_token || steps.gcp-key.outputs.access_token }}
+          registry: ${{ env.GAR_REGISTRY }}
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ghcr.io/${{ github.repository }}
-            ${{ steps.gar.outputs.image }}
+            ${{ env.GAR_REGISTRY }}/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.GAR_IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
@@ -123,6 +85,8 @@ jobs:
           context: omnifocus-mcp
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

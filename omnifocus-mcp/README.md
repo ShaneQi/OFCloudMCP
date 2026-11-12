@@ -54,47 +54,15 @@ data: keep it on the VPS and out of backups you share.
 
 Update: `docker compose pull && docker compose up -d`.
 
-## Publishing to Google Artifact Registry (optional)
+## Google Artifact Registry
 
-`container.yml` also pushes the image to Artifact Registry when configured,
-e.g. for Cloud Run (which cannot pull from GHCR). One-time setup, in Cloud
-Shell (replace PROJECT_ID; region and names are examples):
-
-    PROJECT_ID=my-project
-    REGION=us-central1
-    gcloud services enable artifactregistry.googleapis.com iamcredentials.googleapis.com sts.googleapis.com --project $PROJECT_ID
-    gcloud artifacts repositories create containers --repository-format=docker \
-      --location=$REGION --project $PROJECT_ID
-
-    # A service account that may only push to that repository
-    gcloud iam service-accounts create github-publisher --project $PROJECT_ID
-    SA=github-publisher@$PROJECT_ID.iam.gserviceaccount.com
-    gcloud artifacts repositories add-iam-policy-binding containers --location=$REGION \
-      --project $PROJECT_ID --member=serviceAccount:$SA --role=roles/artifactregistry.writer
-
-    # Workload Identity Federation: let only this GitHub repository act as it
-    gcloud iam workload-identity-pools create github --location=global --project $PROJECT_ID
-    gcloud iam workload-identity-pools providers create-oidc github --location=global \
-      --workload-identity-pool=github --project $PROJECT_ID \
-      --issuer-uri=https://token.actions.githubusercontent.com \
-      --attribute-mapping=google.subject=assertion.sub,attribute.repository=assertion.repository \
-      --attribute-condition="assertion.repository=='ShaneQi/OFCloudMCP'"
-    POOL=$(gcloud iam workload-identity-pools describe github --location=global --project $PROJECT_ID --format='value(name)')
-    gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT_ID \
-      --role=roles/iam.workloadIdentityUser \
-      --member="principalSet://iam.googleapis.com/$POOL/attribute.repository/ShaneQi/OFCloudMCP"
-    echo "GCP_WORKLOAD_IDENTITY_PROVIDER=$POOL/providers/github"
-    echo "GCP_SERVICE_ACCOUNT=$SA"
-
-Then in GitHub, **Settings → Secrets and variables → Actions → Variables**, add
-`GCP_PROJECT_ID`, `GAR_LOCATION` (the region), `GAR_REPOSITORY` (`containers`),
-and the two values printed above. Optionally `GAR_IMAGE` (default
-`omnifocus-mcp`). The next push to `main` (or **Actions → Container image →
-Run workflow**) also pushes
-`REGION-docker.pkg.dev/PROJECT_ID/containers/omnifocus-mcp:latest`.
-
-Instead of Workload Identity Federation you can store a service account key
-as the secret `GCP_SA_KEY`, but a long-lived key is easier to leak.
+`container.yml` also pushes the image to
+`us-south1-docker.pkg.dev/serverless-509006/images/omnifocus-mcp` (same tags),
+e.g. for Cloud Run, which cannot pull from GHCR. It logs in with a service
+account key: add the JSON key as the repository secret **`GCP_SA_KEY`**
+(Settings → Secrets and variables → Actions). The service account needs the
+Artifact Registry Writer role on the `images` repository. To change the
+destination, edit the `env:` block at the top of the workflow.
 
 ## Cloudflare Workers (alternative; needs the Workers Paid plan)
 
