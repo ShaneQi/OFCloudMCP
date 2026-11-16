@@ -6,8 +6,9 @@ Omni Sync Server, encrypted or not). It runs as a small container on any VPS,
 so nothing has to run on your Mac or phone, and it works from claude.ai on the
 web, desktop and mobile, Claude Code and Cowork.
 
-Claude only ever holds a separate access token. Your sync password stays on
-the server.
+Requests are authenticated by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/):
+the connector only answers requests carrying a valid Access JWT, so Claude
+never sees your sync password, which stays on the server.
 
 - **Read tools:** `list_inbox`, `list_due`, `list_flagged`, `list_projects`,
   `get_project`, `search_tasks`, `list_tags`, `get_task`, `get_attachment`,
@@ -61,7 +62,8 @@ Create `.env` next to your compose file and `chmod 600 .env`:
     OFOCUS_URL=https://sync.omnigroup.com/<account>/OmniFocus.ofocus/
     WEBDAV_USER=<account>
     WEBDAV_PASS=<password>
-    ACCESS_TOKEN=<long random string>
+    CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
+    CF_ACCESS_AUD=<Access application's Audience (AUD) tag>
 
     # Optional
     # OF_PASSPHRASE=<database passphrase, if different from WEBDAV_PASS>
@@ -72,8 +74,10 @@ Create `.env` next to your compose file and `chmod 600 .env`:
 - `OFOCUS_URL` is the folder that contains the transaction files: your sync
   server address plus `OmniFocus.ofocus/`. In OmniFocus: Settings → Sync. For
   Omni Sync Server use `https://sync.omnigroup.com/<account name>/OmniFocus.ofocus/`.
-- `ACCESS_TOKEN`: make one with `openssl rand -base64 32` (or any password
-  generator). Claude sends it as `Authorization: Bearer <token>`.
+- `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`: from the Cloudflare Access
+  application in front of the connector (Zero Trust → Access → Applications →
+  your app → Overview → *Application Audience (AUD) Tag*). See
+  [Authentication](#authentication-cloudflare-access).
 
 ### 3. Start
 
@@ -89,28 +93,48 @@ Without compose:
       --env-file .env -p 127.0.0.1:8787:8787 -v omnifocus-cache:/data \
       ghcr.io/shaneqi/ofcloudmcp:latest
 
-### 4. HTTPS
+### 4. HTTPS and Cloudflare Access
 
-Point your reverse proxy at `127.0.0.1:8787`. For example, a Caddyfile:
+Publish `127.0.0.1:8787` through Cloudflare (e.g. a Cloudflare Tunnel, or a
+proxied hostname in front of your reverse proxy) as
+`omnifocus.example.com`, and protect it with an Access self-hosted
+application (see [Authentication](#authentication-cloudflare-access)).
 
-    omnifocus.example.com {
-        reverse_proxy 127.0.0.1:8787
-    }
-
-Check it: `curl https://omnifocus.example.com/health` → `ok`, and
+Check it: `curl https://omnifocus.example.com/health` → `ok`, and, with an
+Access service token allowed by the application's policy:
 
     curl -X POST https://omnifocus.example.com/mcp \
-      -H "Authorization: Bearer <ACCESS_TOKEN>" -H "Content-Type: application/json" \
+      -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" \
+      -H "Content-Type: application/json" \
       -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sync_status","arguments":{}}}'
 
 ### 5. Add it to Claude
 
-claude.ai → Settings → Connectors → Add custom connector:
-
-- URL: `https://omnifocus.example.com/mcp`
-- Request header: `Authorization` = `Bearer <ACCESS_TOKEN>`
+claude.ai → Settings → Connectors → Add custom connector with the URL
+`https://omnifocus.example.com/mcp` and whatever Access expects from Claude
+(for a service-token policy, the request headers `CF-Access-Client-Id` and
+`CF-Access-Client-Secret`).
 
 It is then available in claude.ai (web, desktop, mobile), Cowork and Claude Code.
+
+## Authentication (Cloudflare Access)
+
+Cloudflare Access decides who gets in (service token, identity provider,
+OAuth, …). For every request it lets through, it adds a signed JWT in the
+`Cf-Access-Jwt-Assertion` header. The connector (`src/access.js`) verifies
+that JWT on every `/mcp` request:
+
+- RS256 signature against the team's keys at
+  `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` (cached for an
+  hour; re-fetched when an unknown key id shows up, i.e. after key rotation);
+- `iss` = `https://<CF_ACCESS_TEAM_DOMAIN>`, `aud` contains `CF_ACCESS_AUD`;
+- `exp` / `nbf`, with 60 s leeway.
+
+If the header is absent, an Access JWT sent as `Authorization: Bearer <jwt>`
+is accepted too (same checks). Anything else gets `401`. Because the check
+happens in the container, a request that reaches the origin directly (the
+`run.app` URL, the VPS's IP) without going through Access is refused.
+`/health` stays open.
 
 ### Updating
 
@@ -126,7 +150,8 @@ decrypted tasks**: keep it on the server and out of shared backups.
 |---|---|---|
 | `OFOCUS_URL` | (required) | WebDAV URL of the `OmniFocus.ofocus` folder |
 | `WEBDAV_USER`, `WEBDAV_PASS` | (required) | Sync login (Basic or Digest) |
-| `ACCESS_TOKEN` | (required) | Bearer token Claude must send |
+| `CF_ACCESS_TEAM_DOMAIN` | (required) | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com` |
+| `CF_ACCESS_AUD` | (required) | Access application's AUD tag (several: comma-separated) |
 | `OF_PASSPHRASE` | `WEBDAV_PASS` | Passphrase of an encrypted database |
 | `TIMEZONE` | `America/Chicago` | Zone for OmniFocus' floating (zone-less) dates |
 | `ALLOW_WRITES` | off | `true` lets write tools change the database |
@@ -203,8 +228,19 @@ changes are skipped), on `v*` tags and pull requests:
 2. builds the image for linux/amd64 and linux/arm64 and pushes it to GHCR
    (built-in `GITHUB_TOKEN`) and to Google Artifact Registry
    (`GCP_SA_KEY` secret; destination in the workflow's `env:`);
-3. on `main`, updates the Google Cloud Run service named in `env:` to the new
-   image (only the image; its settings are kept).
+3. on `main`, updates the Google Cloud Run service `of-cloud-mcp` (in
+   `env:`) to the new image (only the image; its settings are kept).
+
+The service has to exist before the first deploy. Create it once, e.g.:
+
+    gcloud run deploy of-cloud-mcp --project serverless-509006 --region us-south1 \
+      --image us-south1-docker.pkg.dev/serverless-509006/images/omnifocus-mcp:latest \
+      --allow-unauthenticated --port 8787 \
+      --set-env-vars OFOCUS_URL=…,WEBDAV_USER=…,CF_ACCESS_TEAM_DOMAIN=…,CF_ACCESS_AUD=… \
+      --set-secrets WEBDAV_PASS=<secret>:latest
+
+`--allow-unauthenticated` only opens the service at the Cloud Run layer;
+every `/mcp` request still needs a valid Cloudflare Access JWT.
 
 Pull requests are built but not pushed. If you only use a VPS, delete the
 Artifact Registry login, the `GAR_*` image line and the Cloud Run steps.
@@ -218,7 +254,8 @@ Artifact Registry login, the `GAR_*` image line and the Cloud Run steps.
 | File | What it does |
 |---|---|
 | `src/server.js` | Node HTTP server; file-backed cache (`CACHE_DIR`); startup load and `REFRESH_MINUTES` refresh |
-| `src/index.js` | fetch-style handler: bearer-token check (constant time), routes `/mcp` |
+| `src/index.js` | fetch-style handler: Cloudflare Access check, routes `/mcp` |
+| `src/access.js` | Cloudflare Access JWT verification (team keys, iss/aud/exp) |
 | `src/mcp.js` | Stateless MCP over Streamable HTTP (initialize, ping, tools/list, tools/call); merges read and write tools; `writeMode` gates writes |
 | `src/store.js` | `loadModel`: PROPFIND listing, incremental replay, rebuild on compaction, cache (key `model-v3`; bump when the model's shape changes), unlocked-key cache; `syncContext`/`fetchFile` for raw access |
 | `src/dav.js` | WebDAV fetch with Basic→Digest (MD5/SHA-256, `-sess`), manual redirects |
