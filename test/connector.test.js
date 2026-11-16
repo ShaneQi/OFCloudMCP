@@ -4,6 +4,7 @@ import { zipSync, strToU8 } from "fflate";
 import worker from "../src/index.js";
 import { resetCache } from "../src/store.js";
 import { parseDate } from "../src/query.js";
+import { ACCESS_ENV, TOKEN, signToken } from "./helpers/access.js";
 
 const NS = 'xmlns="http://www.omnigroup.com/namespace/OmniFocus/v2"';
 const doc = (body) => `<?xml version="1.0" encoding="utf-8" standalone="no"?>\n<omnifocus ${NS} app-id="com.omnigroup.OmniFocus4">\n${body}\n</omnifocus>`;
@@ -56,15 +57,15 @@ const ENV = {
   OFOCUS_URL: "https://dav.example.com/dav/OmniFocus.ofocus",
   WEBDAV_USER: "shane",
   WEBDAV_PASS: "pw",
-  ACCESS_TOKEN: "secret-token",
+  ...ACCESS_ENV,
   TIMEZONE: "America/Chicago",
 };
 const ctx = { waitUntil() {} };
 
-async function rpc(method, params, token = "secret-token") {
+async function rpc(method, params, token = TOKEN) {
   const req = new Request("https://w.example/mcp", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { "Cf-Access-Jwt-Assertion": token, "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
   const res = await worker.fetch(req, ENV, ctx);
@@ -83,6 +84,30 @@ test("floating dates use the configured time zone", () => {
 test("rejects a wrong token", async () => {
   const { status } = await rpc("ping", {}, "nope");
   assert.equal(status, 401);
+});
+
+test("checks the Cloudflare Access JWT", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  assert.equal((await rpc("ping", {})).status, 200);
+  for (const claims of [{ exp: now - 120 }, { nbf: now + 600 }, { aud: ["other"] }, { iss: "https://evil.cloudflareaccess.com" }]) {
+    assert.equal((await rpc("ping", {}, await signToken(claims))).status, 401, JSON.stringify(claims));
+  }
+  assert.equal((await rpc("ping", {}, await signToken({}, { kid: "unknown" }))).status, 401);
+  const { privateKey } = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign"]);
+  assert.equal((await rpc("ping", {}, await signToken({}, { key: privateKey }))).status, 401);
+  const [h, p, sig] = TOKEN.split(".");
+  const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, "base64url")), email: "x@y" })).toString("base64url");
+  assert.equal((await rpc("ping", {}, `${h}.${forged}.${sig}`)).status, 401);
+  const res = await worker.fetch(new Request("https://w.example/mcp", { method: "POST", body: "{}" }), ENV, ctx);
+  assert.equal(res.status, 401);
+  const bearer = await worker.fetch(new Request("https://w.example/mcp", {
+    method: "POST", headers: { Authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+  }), ENV, ctx);
+  assert.equal(bearer.status, 200);
+  const noConfig = await worker.fetch(new Request("https://w.example/mcp", { method: "POST" }), { ...ENV, CF_ACCESS_AUD: "" }, ctx);
+  assert.equal(noConfig.status, 500);
 });
 
 test("initialize and tools/list", async () => {
@@ -182,7 +207,7 @@ test('"false" in <hidden> or <completed> does not mark items dropped or done', a
 async function callWith(env, name, args = {}) {
   const res = await worker.fetch(new Request("https://w.example/mcp", {
     method: "POST",
-    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
+    headers: { "Cf-Access-Jwt-Assertion": TOKEN, "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
   }), env, ctx);
   return (await res.json()).result;

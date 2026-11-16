@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import worker from "../src/index.js";
 import { resetCache } from "../src/store.js";
 import { floatingDate, linkRankAfter, rankAfter } from "../src/write.js";
+import { ACCESS_ENV, TOKEN } from "./helpers/access.js";
 
 // In-memory WebDAV folder holding the encrypted fixture database (password "pw").
 const FIXTURE = new URL("./fixtures/encrypted.ofocus/", import.meta.url);
@@ -49,7 +50,7 @@ function installDav() {
 
 const BASE_ENV = {
   OFOCUS_URL: "https://dav.example.com/dav/OmniFocus.ofocus",
-  WEBDAV_USER: "u", WEBDAV_PASS: "pw", ACCESS_TOKEN: "t", TIMEZONE: "America/Chicago",
+  WEBDAV_USER: "u", WEBDAV_PASS: "pw", ...ACCESS_ENV, TIMEZONE: "America/Chicago",
 };
 const ON = { ...BASE_ENV, ALLOW_WRITES: "true" };
 const ctx = { waitUntil() {} };
@@ -57,7 +58,7 @@ const ctx = { waitUntil() {} };
 async function call(env, name, args = {}) {
   const res = await worker.fetch(new Request("https://w.example/mcp", {
     method: "POST",
-    headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
   }), env, ctx);
   const r = (await res.json()).result;
@@ -283,7 +284,7 @@ test("attachments: add text and image, read back, delete", async () => {
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const pngId = idFrom((await call(ON, "add_attachment", { id: "t1", filename: "dot.png", base64: png })).text, "New attachment id");
   const res = await worker.fetch(new Request("https://w.example/mcp", {
-    method: "POST", headers: { Authorization: "Bearer t", "Content-Type": "application/json" },
+    method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_attachment", arguments: { id: pngId } } }),
   }), ON, ctx);
   const content = (await res.json()).result.content;

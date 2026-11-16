@@ -10,7 +10,8 @@
 # On main, it then deploys the new image to the Cloud Run service below
 # (only the image changes; env vars, secrets and volumes are kept). The key's
 # service account needs Cloud Run Developer on the service and Service Account
-# User on the service's runtime account.
+# User on the service's runtime account. The service must already exist (see
+# README "Cloud Run" for the one-time create command).
 name: Container image
 
 on:
@@ -33,7 +34,7 @@ env:
   GAR_PROJECT_ID: serverless-509006
   GAR_REPOSITORY: images
   GAR_IMAGE: omnifocus-mcp
-  CLOUD_RUN_SERVICE: omnifocus-mcp
+  CLOUD_RUN_SERVICE: of-cloud-mcp
   CLOUD_RUN_REGION: us-south1
 
 jobs:

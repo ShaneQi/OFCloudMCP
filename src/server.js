@@ -1,10 +1,11 @@
 // Node entry point: runs the connector as a plain-HTTP server (e.g. in a
 // container behind an HTTPS reverse proxy). Routes:
-//   POST /mcp  (Authorization: Bearer <ACCESS_TOKEN>)
+//   POST /mcp  (Cloudflare Access JWT in Cf-Access-Jwt-Assertion; see src/access.js)
 //   GET  /health  (also /healthz; Cloud Run reserves paths ending in "z")
 //
 // Configuration (environment variables):
-//   OFOCUS_URL, WEBDAV_USER, WEBDAV_PASS, ACCESS_TOKEN   required
+//   OFOCUS_URL, WEBDAV_USER, WEBDAV_PASS                 required
+//   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD                 required (Cloudflare Access)
 //   OF_PASSPHRASE     database passphrase, if different from WEBDAV_PASS
 //   TIMEZONE          default America/Chicago
 //   PORT              default 8787
@@ -13,7 +14,7 @@
 //   REFRESH_MINUTES   re-read new transactions in the background this often,
 //                     so requests rarely wait for downloads (default 10; 0 = off)
 //
-// It runs behind your own HTTPS reverse proxy; it speaks plain HTTP.
+// It runs behind Cloudflare Access (and HTTPS); it speaks plain HTTP.
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -51,7 +52,7 @@ function fileKv(dir) {
 }
 
 const env = { TIMEZONE: "America/Chicago", ...process.env };
-for (const key of ["OFOCUS_URL", "WEBDAV_USER", "WEBDAV_PASS", "ACCESS_TOKEN"]) {
+for (const key of ["OFOCUS_URL", "WEBDAV_USER", "WEBDAV_PASS", "CF_ACCESS_TEAM_DOMAIN", "CF_ACCESS_AUD"]) {
   if (!env[key]) console.warn(`warning: ${key} is not set`);
 }
 if (CACHE_DIR) {
