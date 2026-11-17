@@ -266,7 +266,7 @@ Artifact Registry login, the `GAR_*` image line and the Cloud Run steps.
 | `src/pbkdf2.js` | Pure-JS PBKDF2 (SHA-1/256; SHA-512 via WebCrypto) for runtimes that cap rounds |
 | `src/ofocus.js` | Unzip + parse `contents.xml`, replay ops into the model; rich-text notes to text |
 | `src/query.js` | Read tools and formatting; floating-date handling |
-| `src/chain.js` | Transaction-name chain analysis (heads, consistency) |
+| `src/chain.js` | Transaction-name chain analysis: apply order (parents first; file-name order is not enough when linked transactions share a second), heads, consistency |
 | `src/write.js` | Transaction builders and `commit()` (chain checks, verify, temp upload + MOVE) |
 | `src/writetools.js` | Write tools and `get_attachment` |
 | `src/repeat.js` | RRULE next-occurrence engine for repeating actions |
@@ -322,7 +322,9 @@ OmniFocus, completed/dropped project status written by OmniFocus, deletions,
 ### Debugging against a real database
 
 - `inspect_sync` (via MCP or curl): chain heads, devices' positions, key slots,
-  `data/`; `{"find": "<regex>"}` returns raw matching elements, e.g.
+  `data/`; `{"all_files": true}` lists every transaction file name in the
+  order applied (default: the newest 15), `{"name_filter": "20261116"}` only
+  those containing that text; `{"find": "<regex>"}` returns raw matching elements, e.g.
   `{"find":"op=\"update\"","limit":5}` or `{"find":"<task id=\"ID\""}`.
 - `scripts/dump.mjs`: `OFOCUS_URL=… WEBDAV_USER=… WEBDAV_PASS=… npm run dump`
   writes `dump/report.txt`, `model.json`, `tools.txt` (git-ignored; contains
