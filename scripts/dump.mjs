@@ -24,6 +24,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { XMLParser } from "fast-xml-parser";
 import { config, listTransactions } from "../src/store.js";
+import { analyzeChain } from "../src/chain.js";
 import { davFetch } from "../src/dav.js";
 import { newModel, applyTransaction, readContentsXml } from "../src/ofocus.js";
 import { isEncryptedFile, unlockDocumentKey, decryptFile } from "../src/crypto.js";
@@ -46,7 +47,7 @@ const log = (...a) => console.error(...a);
 // ---------- 1. get the transaction files ----------
 let names;
 if (localDir) {
-  names = fs.readdirSync(localDir).filter((n) => TRANSACTION.test(n)).sort();
+  names = analyzeChain(fs.readdirSync(localDir).filter((n) => TRANSACTION.test(n))).files.map((f) => f.name);
   for (const n of names) fs.copyFileSync(path.join(localDir, n), path.join(filesDir, n));
   if (fs.existsSync(path.join(localDir, "encrypted"))) fs.copyFileSync(path.join(localDir, "encrypted"), path.join(outDir, "encrypted"));
   log(`Found ${names.length} transaction files in ${localDir}`);

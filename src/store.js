@@ -5,6 +5,7 @@ import { UserError } from "./errors.js";
 import { newModel, applyTransaction, readContentsXml } from "./ofocus.js";
 import { davFetch, resetDigest } from "./dav.js";
 import { isEncryptedFile, unlockDocumentKey, decryptFile } from "./crypto.js";
+import { analyzeChain } from "./chain.js";
 
 const CACHE_KEY = "model-v3"; // bump when the model's shape changes
 const TRANSACTION = /^\d{14}=.+\.zip$/;
@@ -37,6 +38,8 @@ export function config(env) {
   return { base, user: env.WEBDAV_USER, pass: env.WEBDAV_PASS };
 }
 
+// The folder's transaction files, parents before children, with the other
+// entries as .others and the folder's final URL as .listedUrl.
 export async function listTransactions(cfg) {
   const res = await davFetch(cfg, cfg.base, {
     method: "PROPFIND",
@@ -77,7 +80,10 @@ export async function listTransactions(cfg) {
   }
   files.others = others;
   files.listedUrl = res.davUrl ?? cfg.base;
-  files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  // In the order to apply them: parents before children (see chain.js). File
+  // name order is not enough, since linked transactions can share a timestamp.
+  const place = new Map(analyzeChain(files.map((f) => f.name)).files.map((f, i) => [f.name, i]));
+  files.sort((a, b) => place.get(a.name) - place.get(b.name));
   return files;
 }
 

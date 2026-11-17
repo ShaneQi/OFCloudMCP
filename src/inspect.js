@@ -46,21 +46,35 @@ async function findElements(env, pattern, limit, xml_chars) {
   return text.length > xml_chars ? text.slice(0, xml_chars) + "\n…(truncated)" : text;
 }
 
-export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 3 } = {}) {
+const SHOWN = 15; // transaction names listed unless all_files or name_filter is given
+
+export async function inspectSync(env, { xml_chars = 6000, find = null, limit = 3, all_files = false, name_filter = null } = {}) {
   if (find) return findElements(env, find, limit, xml_chars);
   const { cfg, files, docKey, encrypted } = await syncContext(env);
   const names = files.map((f) => f.name);
   const out = [];
   out.push(`Folder: ${files.listedUrl}`);
+  // names are in the order they are applied: parents first (see chain.js).
   out.push(`Transaction files: ${names.length}`);
-  for (const n of names.slice(-15)) out.push(`  ${n}`);
-  if (names.length > 15) out.push(`  (… ${names.length - 15} older)`);
+  if (name_filter) {
+    const hits = names.filter((n) => n.includes(name_filter));
+    out.push(`  ${hits.length} with "${name_filter}" in the name, in the order applied:`);
+    for (const n of hits) out.push(`  ${n}`);
+  } else {
+    const shown = all_files ? names : names.slice(-SHOWN);
+    if (names.length > shown.length) out.push(`  (… ${names.length - shown.length} applied earlier; all_files: true lists them)`);
+    for (const n of shown) out.push(`  ${n}`);
+  }
+  const sorted = [...names].sort();
+  const moved = names.filter((n, i) => n !== sorted[i]);
+  if (moved.length) out.push(`  Applied in a different order than the names sort (${moved.length} file(s), same-second links): ${moved.slice(0, 6).join(", ")}${moved.length > 6 ? ", …" : ""}`);
 
   const a = analyzeChain(names);
   const b = analyzeChainOwnFirst(names);
   out.push("", "Chain, reading names as parents…+own id:");
   out.push(`  consistent: ${a.consistent}; heads: ${a.heads.join(", ") || "none"}`);
   for (const p of a.problems.slice(0, 5)) out.push(`  problem: ${p}`);
+  if (a.problems.length > 5) out.push(`  (… ${a.problems.length - 5} more)`);
   out.push("Chain, reading names as own id+parents…:");
   out.push(`  consistent: ${b.consistent}; heads: ${b.heads.join(", ") || "none"}`);
   for (const p of b.problems.slice(0, 5)) out.push(`  problem: ${p}`);

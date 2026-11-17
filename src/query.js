@@ -516,12 +516,16 @@ export const TOOLS = [
       xml_chars: { type: "integer", minimum: 200, maximum: 50000, description: "Most XML characters to show (default 6000)." },
       find: { type: "string", description: "Instead of the overview, show raw elements (task, context, task-to-tag, …) whose XML matches this regular expression." },
       limit: { type: "integer", minimum: 1, maximum: 20, description: "With find: most elements to show (default 3)." },
+      all_files: { type: "boolean", description: "List every transaction file name, in the order applied, instead of the newest 15 (default false)." },
+      name_filter: { type: "string", description: "List only the transaction file names containing this text, e.g. a timestamp prefix \"20261116\" or a transaction id." },
     }),
     run(_ix, a, _data, { env }) {
       return inspectSync(env, {
         xml_chars: argInt(a.xml_chars, 6000, 200, 50000),
         find: argStr(a.find, "find"),
         limit: argInt(a.limit, 3, 1, 20),
+        all_files: a.all_files === true,
+        name_filter: argStr(a.name_filter, "name_filter"),
       });
     },
   },

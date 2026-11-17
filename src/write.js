@@ -268,6 +268,8 @@ export async function commit(env, ctx, build, { dryRun }) {
         "Let OmniFocus sync on a device to merge them, then try again."
     );
   }
+  // The one head follows every other transaction, so it is the last to apply
+  // and nothing is stamped later than it.
   const head = chain.heads[0];
   const newest = chain.files.at(-1);
   if (newest.own !== head) throw new UserError("Not writing: the newest transaction is not the chain's head.");
@@ -279,7 +281,8 @@ export async function commit(env, ctx, build, { dryRun }) {
   if (valid !== true) throw new Error(`Generated XML is invalid: ${valid.err?.msg}`);
 
   let ts = nameStamp(now);
-  if (ts <= newest.ts) ts = bumpStamp(newest.ts);
+  const latest = chain.files.reduce((m, f) => (f.ts > m ? f.ts : m), newest.ts);
+  if (ts <= latest) ts = bumpStamp(latest);
   const txId = newId();
   const name = `${ts}=${head}+${txId}.zip`;
 
