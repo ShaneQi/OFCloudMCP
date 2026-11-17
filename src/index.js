@@ -13,14 +13,17 @@ export default {
     if (pathname !== "/mcp") return new Response("Not found\n", { status: 404 });
     const config = accessConfig(env);
     if (!config) {
-      return new Response("Server is missing CF_ACCESS_TEAM_DOMAIN / CF_ACCESS_AUD.\n", { status: 500 });
+      return new Response("Server is missing its Cloudflare Access settings (CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD).\n", { status: 500 });
     }
     const token = accessToken(request);
-    if (!token) return unauthorized();
+    if (!token) {
+      console.warn("access denied: no Cloudflare Access token");
+      return unauthorized();
+    }
     try {
       await verifyAccessJwt(token, config);
     } catch (e) {
-      console.warn(`rejected request: ${e?.message ?? e}`);
+      console.warn(`access denied: ${e?.message ?? e}`);
       return unauthorized();
     }
     if (request.method !== "POST") {
