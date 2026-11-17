@@ -5,7 +5,7 @@
 //
 // Configuration (environment variables):
 //   OFOCUS_URL, WEBDAV_USER, WEBDAV_PASS                 required
-//   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD                 required (Cloudflare Access)
+//   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD                 required (Cloudflare Access; exits if unset)
 //   OF_PASSPHRASE     database passphrase, if different from WEBDAV_PASS
 //   TIMEZONE          default America/Chicago
 //   PORT              default 8787
@@ -20,6 +20,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import app from "./index.js";
+import { accessConfig } from "./access.js";
 import { loadModel } from "./store.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -52,8 +53,13 @@ function fileKv(dir) {
 }
 
 const env = { TIMEZONE: "America/Chicago", ...process.env };
-for (const key of ["OFOCUS_URL", "WEBDAV_USER", "WEBDAV_PASS", "CF_ACCESS_TEAM_DOMAIN", "CF_ACCESS_AUD"]) {
+for (const key of ["OFOCUS_URL", "WEBDAV_USER", "WEBDAV_PASS"]) {
   if (!env[key]) console.warn(`warning: ${key} is not set`);
+}
+const access = accessConfig(env);
+if (!access) {
+  console.error("error: CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD must both be set (Cloudflare Access team domain and the application's AUD tag).");
+  process.exit(1);
 }
 if (CACHE_DIR) {
   await fs.mkdir(CACHE_DIR, { recursive: true, mode: 0o700 });
@@ -110,7 +116,7 @@ async function refresh(reason) {
 }
 
 server.listen(PORT, () => {
-  console.log(`OmniFocus MCP listening on :${PORT} (cache: ${CACHE_DIR || "memory only"})`);
+  console.log(`OmniFocus MCP listening on :${PORT} (Access issuer: ${access.issuer}, cache: ${CACHE_DIR || "memory only"})`);
   refresh("startup load");
   if (REFRESH_MINUTES > 0) setInterval(() => refresh("refresh"), REFRESH_MINUTES * 60_000).unref();
 });

@@ -131,7 +131,10 @@ that JWT on every `/mcp` request:
 - `exp` / `nbf`, with 60 s leeway.
 
 If the header is absent, an Access JWT sent as `Authorization: Bearer <jwt>`
-is accepted too (same checks). Anything else gets `401`. Because the check
+is accepted too (same checks). Anything else gets `401` with
+`WWW-Authenticate: Bearer`; the reason is only logged, as `access denied: …`.
+The server exits at startup if either `CF_ACCESS_*` variable is missing.
+Because the check
 happens in the container, a request that reaches the origin directly (the
 `run.app` URL, the VPS's IP) without going through Access is refused.
 `/health` stays open.
@@ -151,7 +154,7 @@ decrypted tasks**: keep it on the server and out of shared backups.
 | `OFOCUS_URL` | (required) | WebDAV URL of the `OmniFocus.ofocus` folder |
 | `WEBDAV_USER`, `WEBDAV_PASS` | (required) | Sync login (Basic or Digest) |
 | `CF_ACCESS_TEAM_DOMAIN` | (required) | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com` |
-| `CF_ACCESS_AUD` | (required) | Access application's AUD tag (several: comma-separated) |
+| `CF_ACCESS_AUD` | (required) | Access application's AUD tag (several: comma-separated). The server exits at startup if either is unset |
 | `OF_PASSPHRASE` | `WEBDAV_PASS` | Passphrase of an encrypted database |
 | `TIMEZONE` | `America/Chicago` | Zone for OmniFocus' floating (zone-less) dates |
 | `ALLOW_WRITES` | off | `true` lets write tools change the database |
