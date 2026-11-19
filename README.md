@@ -172,6 +172,10 @@ checked against a real database with `inspect_sync`:
 
 - `add_task`: an action in the inbox or an active project, with note, tags,
   defer / due / planned dates, flag, estimate and repeat rule.
+- Signature: every action or project added with `add_task` / `add_project`
+  gets `OFCloudMCP` on the last line of its note (the whole note when none is
+  given), so items added through the connector stand out in OmniFocus.
+  `edit_task` doesn't add it.
 - `edit_task`: change name, note, dates, flag, estimate, tags or repeat rule,
   or move an action to another project or the inbox. Only given fields change.
 - `complete_task` / `drop_task`: `undo: true` reverses. Completing a repeating

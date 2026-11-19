@@ -122,7 +122,7 @@ test("add_task writes one encrypted transaction that reads back", async () => {
   assert.match(detail, /Defer until: Wed, Nov 18, 2026, 8:00 AM/);
   assert.match(detail, /Flagged: yes/);
   assert.match(detail, /Estimate: 30 min/);
-  assert.match(detail, /Note:\nShop A\n\nor Shop B/);
+  assert.match(detail, /Note:\nShop A\n\nor Shop B\n\nOFCloudMCP(\n|$)/); // signed
 
   // A fresh instance (no cache) sees it too, and an independent decryptor
   // written from Omni's spec accepts the file.
@@ -192,6 +192,22 @@ test("refuses to write when the sync chain has two heads", async () => {
 
 const idFrom = (text, label = "New id") => new RegExp(`${label}: ([A-Za-z0-9_.-]+)`).exec(text)?.[1];
 
+test("every added task's note ends with the signature, even without a note", async () => {
+  resetCache();
+  installDav();
+  for (const [note, want] of [[undefined, /Note:\nOFCloudMCP(\n|$)/], ["   ", /Note:\nOFCloudMCP(\n|$)/], ["Call back\n\n", /Note:\nCall back\n\nOFCloudMCP(\n|$)/]]) {
+    const r = await call(ON, "add_task", { name: "Signed", ...(note !== undefined && { note }) });
+    assert.match(r.text, /^Done\./, r.text);
+    assert.match((await call(ON, "get_task", { id: idFrom(r.text) })).text, want, JSON.stringify(note));
+  }
+  // Editing a task's note does not add the signature.
+  const id = idFrom((await call(ON, "add_task", { name: "Edited" })).text);
+  assert.match((await call(ON, "edit_task", { id, note: "mine" })).text, /^Done\./);
+  const detail = (await call(ON, "get_task", { id })).text;
+  assert.match(detail, /Note:\nmine(\n|$)/);
+  assert.doesNotMatch(detail, /OFCloudMCP/);
+});
+
 test("add_tag and add_project, then set_project_status", async () => {
   resetCache();
   installDav();
@@ -208,7 +224,7 @@ test("add_tag and add_project, then set_project_status", async () => {
   assert.match(p, /Status: active/);
   assert.match(p, /Order: sequential/);
   assert.match(p, /Tags: Hardware/);
-  assert.match(p, /Note:\nclean up/);
+  assert.match(p, /Note:\nclean up\n\nOFCloudMCP(\n|$)/); // signed
   assert.match((await call(ON, "add_project", { name: "Lists", type: "single_actions", status: "on_hold" })).text, /^Done\./);
   assert.match((await call(ON, "list_projects", { status: "on_hold" })).text, /Lists · on hold/);
 

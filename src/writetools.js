@@ -124,6 +124,11 @@ function requireAction(t, verb, alternative = "set_project_status") {
   if (t.project) throw new UserError(`${t.name} is a project; to ${verb} a project use ${alternative}.`);
 }
 
+// Every item Claude adds gets this signature at the end of its note, so items
+// added through the connector can be told apart in OmniFocus.
+export const SIGNATURE = "OFCloudMCP";
+export const signNote = (note) => (note && note.trim() ? `${note.replace(/\s+$/, "")}\n\n${SIGNATURE}` : SIGNATURE);
+
 // ---------- tools ----------
 export const WRITE_TOOLS = [
   {
@@ -133,7 +138,7 @@ export const WRITE_TOOLS = [
     title: "Add action",
     description:
       "Add a new action to OmniFocus: to the inbox, or to an active project. Optional note, tags (existing tags " +
-      "only), defer/due/planned dates, flag and estimate. Writes to the user's synced database; " +
+      "only), defer/due/planned dates, flag and estimate. The note always ends with the signature \"" + SIGNATURE + "\". Writes to the user's synced database; " +
       "use dry_run to preview.",
     inputSchema: OBJ(
       {
@@ -154,7 +159,7 @@ export const WRITE_TOOLS = [
     run: run(async (ix, a, env, ctx) => {
       const name = argStr(a.name, "name", true);
       if (!name) throw new UserError('"name" is required.');
-      const note = argStr(a.note, "note");
+      const note = signNote(argStr(a.note, "note"));
       const tz = env.TIMEZONE || "America/Chicago";
       const s = ix.model.settings ?? {};
       const due = dateArg(a, "due", tz, s.DefaultDueTime, "due") ?? null;
@@ -197,7 +202,7 @@ export const WRITE_TOOLS = [
             if (!!t.inbox !== !project) return "its inbox flag is wrong";
             if ((t.due ?? null) !== due || (t.start ?? null) !== start || (t.planned ?? null) !== planned) return "a date reads back differently";
             if ((t.repeat ?? null) !== (repeat?.["repetition-rule"] ?? null)) return "the repeat rule reads back differently";
-            if ((t.note ?? null) !== (note ? note.replace(/\r\n?/g, "\n").trim() : null)) return "the note reads back differently";
+            if ((t.note ?? null) !== note.replace(/\r\n?/g, "\n").trim()) return "the note reads back differently";
             const got = linksOf(m, id).map((l) => l.context).sort();
             if (got.join() !== [...tags].sort().join()) return "its tags read back differently";
             return null;
@@ -482,7 +487,7 @@ export const WRITE_TOOLS = [
     title: "Add project",
     description:
       "Create a new OmniFocus project: parallel, sequential, or a single-action list, optionally in a folder, " +
-      "with note, tags, dates and flag. Use add_task to add its actions. Use dry_run to preview.",
+      "with note, tags, dates and flag. The note always ends with the signature \"" + SIGNATURE + "\". Use add_task to add its actions. Use dry_run to preview.",
     inputSchema: OBJ({
       name: { type: "string" },
       note: { type: "string" },
@@ -497,7 +502,7 @@ export const WRITE_TOOLS = [
     }, ["name"]),
     run: run(async (ix, a, env, ctx) => {
       const name = argStr(a.name, "name", true);
-      const note = argStr(a.note, "note");
+      const note = signNote(argStr(a.note, "note"));
       const type = argStr(a.type, "type") ?? "parallel";
       if (!["parallel", "sequential", "single_actions"].includes(type)) throw new UserError('"type" must be parallel, sequential or single_actions.');
       const status = argStr(a.status, "status") ?? "active";
